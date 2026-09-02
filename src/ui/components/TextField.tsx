@@ -56,7 +56,8 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: spacing.md,
   },
-  input: { flex: 1, paddingVertical: 10, outlineStyle: "none" } as object,
+  // minWidth 0: su web l'input ha una larghezza intrinseca e altrimenti sborda dal contenitore.
+  input: { flex: 1, minWidth: 0, width: "100%", paddingVertical: 10, outlineStyle: "none" } as object,
   affix: { marginHorizontal: 4 },
   hint: { fontSize: font.small, marginTop: 6 },
 });
