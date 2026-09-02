@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Overlay } from "./Overlay";
 import { font, radius, spacing, useTheme } from "../theme";
 
 export type PickerItem<T extends string> = {
@@ -23,7 +24,7 @@ type Props<T extends string> = {
 export function PickerSheet<T extends string>({ visible, title, items, value, onSelect, onClose }: Props<T>) {
   const t = useTheme();
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Overlay visible={visible} onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={[styles.sheet, { backgroundColor: t.surface }]} onPress={() => undefined}>
           <View style={styles.header}>
@@ -57,7 +58,7 @@ export function PickerSheet<T extends string>({ visible, title, items, value, on
           </ScrollView>
         </Pressable>
       </Pressable>
-    </Modal>
+    </Overlay>
   );
 }
 

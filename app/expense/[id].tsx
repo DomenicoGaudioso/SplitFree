@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Sharing from "expo-sharing";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
-import { Image, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { categoryById, iconForExpense } from "@/domain/categories";
 import { formatIsoDate } from "@/domain/dates";
 import { convertMinor, formatMinor } from "@/domain/money";
 import { attachmentFileUri, isImageMime } from "@/store/attachments";
 import { useStore } from "@/store/store";
 import { useExpense, useExpenseAttachments, useGroup, usePeopleMap, useSelf } from "@/store/selectors";
-import { AttachmentThumb, Avatar, Button, Card, EmptyState, IconBadge, ListRow, Money, Screen, SectionHeader, Tag } from "@/ui/components";
+import { AttachmentThumb, Avatar, Button, Card, EmptyState, IconBadge, ListRow, Money, Overlay, Screen, SectionHeader, Tag } from "@/ui/components";
 import { confirm, notify } from "@/ui/dialogs";
 import { font, spacing, useTheme } from "@/ui/theme";
 
@@ -151,14 +151,14 @@ export default function ExpenseDetailScreen() {
         <Button title="Elimina" icon="trash-outline" variant="danger" size="lg" onPress={onDelete} />
       </View>
 
-      <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
+      <Overlay visible={!!viewer} onRequestClose={() => setViewer(null)}>
         <Pressable style={styles.viewer} onPress={() => setViewer(null)}>
           {viewer ? <Image source={{ uri: viewer }} style={{ width: "100%", height: "100%" }} resizeMode="contain" /> : null}
           <View style={styles.close}>
             <Ionicons name="close-circle" size={36} color="#fff" />
           </View>
         </Pressable>
-      </Modal>
+      </Overlay>
     </Screen>
   );
 }
