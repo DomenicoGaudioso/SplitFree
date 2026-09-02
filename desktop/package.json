@@ -1,0 +1,42 @@
+{
+  "name": "splitfree-desktop",
+  "version": "0.1.0",
+  "description": "SplitFree per macOS e Windows (involucro Electron della build web)",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "prepare-app": "node copy-dist.js",
+    "start": "npm run prepare-app && electron .",
+    "build": "npm run prepare-app && electron-builder --mac --publish never",
+    "build:win": "npm run prepare-app && electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.domenicogaudioso.splitfree",
+    "productName": "SplitFree",
+    "directories": {
+      "output": "out",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "app/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.finance",
+      "target": ["dmg", "zip"],
+      "hardenedRuntime": false,
+      "identity": null
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
