@@ -2,7 +2,9 @@ import { create } from "zustand";
 import type {
   AppData,
   Attachment,
+  CloudProject,
   Expense,
+  FirebaseWebConfig,
   Group,
   Payment,
   Person,
@@ -71,6 +73,13 @@ type Store = {
 
   updateSettings: (patch: Partial<Settings>) => void;
   cacheRate: (from: string, to: string, rate: number) => void;
+
+  addCloudProject: (input: { label: string; config: FirebaseWebConfig; googleClientId?: string; microsoftClientId?: string }) => CloudProject;
+  updateCloudProject: (id: string, patch: Partial<Pick<CloudProject, "label" | "googleClientId" | "microsoftClientId">>) => void;
+  removeCloudProject: (id: string) => void;
+
+  /** Registra (o aggiorna) localmente un gruppo condiviso: usato dopo la creazione o l'adesione via invito. */
+  upsertCloudGroupPointer: (group: Group) => void;
 
   replaceAll: (data: AppData) => void;
   resetAll: () => void;
@@ -304,6 +313,45 @@ export const useStore = create<Store>((set, get) => {
             [rateKey(to, from)]: { rate: 1 / rate, fetchedAt: nowIso() },
           },
         },
+      }));
+    },
+
+    addCloudProject: (input) => {
+      const project: CloudProject = {
+        id: uuid(),
+        label: input.label.trim() || input.config.projectId,
+        config: input.config,
+        googleClientId: input.googleClientId?.trim() || undefined,
+        microsoftClientId: input.microsoftClientId?.trim() || undefined,
+        createdAt: nowIso(),
+      };
+      commit((d) => ({ ...d, settings: { ...d.settings, cloudProjects: [...d.settings.cloudProjects, project] } }));
+      return project;
+    },
+
+    updateCloudProject: (id, patch) => {
+      commit((d) => ({
+        ...d,
+        settings: {
+          ...d.settings,
+          cloudProjects: d.settings.cloudProjects.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+        },
+      }));
+    },
+
+    removeCloudProject: (id) => {
+      commit((d) => ({
+        ...d,
+        settings: { ...d.settings, cloudProjects: d.settings.cloudProjects.filter((p) => p.id !== id) },
+      }));
+    },
+
+    upsertCloudGroupPointer: (group) => {
+      commit((d) => ({
+        ...d,
+        groups: d.groups.some((g) => g.id === group.id)
+          ? d.groups.map((g) => (g.id === group.id ? group : g))
+          : [group, ...d.groups],
       }));
     },
 

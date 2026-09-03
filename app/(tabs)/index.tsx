@@ -16,6 +16,7 @@ import {
   PickerSheet,
   Screen,
   SectionHeader,
+  Tag,
 } from "@/ui/components";
 import { font, spacing, useTheme, withAlpha } from "@/ui/theme";
 
@@ -28,6 +29,7 @@ export default function HomeScreen() {
   const expenses = useExpenses();
   const myBalances = useMyBalancesByGroup();
   const [pickGroup, setPickGroup] = useState(false);
+  const [pickNewGroupKind, setPickNewGroupKind] = useState(false);
 
   const activeGroups = useMemo(() => groups.filter((g) => !g.archivedAt), [groups]);
   const groupsById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
@@ -101,7 +103,7 @@ export default function HomeScreen() {
         )}
         <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
           <Button title="Nuova spesa" icon="add" variant="secondary" onPress={startExpense} />
-          <Button title="Nuovo gruppo" icon="people" variant="onPrimary" onPress={() => router.push("/group/edit")} />
+          <Button title="Nuovo gruppo" icon="people" variant="onPrimary" onPress={() => setPickNewGroupKind(true)} />
         </View>
       </Card>
 
@@ -125,19 +127,24 @@ export default function HomeScreen() {
                   <Text style={{ fontSize: 22 }}>{group.emoji || "👥"}</Text>
                 </View>
                 <View style={{ flex: 1, marginLeft: spacing.md }}>
-                  <Text style={{ color: t.text, fontWeight: "700", fontSize: font.body }} numberOfLines={1}>
-                    {group.name}
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={{ color: t.text, fontWeight: "700", fontSize: font.body, flexShrink: 1 }} numberOfLines={1}>
+                      {group.name}
+                    </Text>
+                    {group.cloud ? <Tag label="condiviso" color={t.primary} /> : null}
+                  </View>
                   <View style={{ marginTop: 4 }}>
                     <AvatarStack people={group.memberIds.map((id) => people.get(id)).filter((p): p is NonNullable<typeof p> => !!p)} size={22} />
                   </View>
                 </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={{ color: t.textFaint, fontSize: font.tiny, fontWeight: "700" }}>
-                    {netMinor > 0 ? "TI DEVONO" : netMinor < 0 ? "DEVI" : "IN PARI"}
-                  </Text>
-                  <Money minor={Math.abs(netMinor)} currency={group.currency} colored={false} color={netMinor > 0 ? t.positive : netMinor < 0 ? t.negative : t.textMuted} size={font.h3} weight="800" />
-                </View>
+                {!group.cloud ? (
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={{ color: t.textFaint, fontSize: font.tiny, fontWeight: "700" }}>
+                      {netMinor > 0 ? "TI DEVONO" : netMinor < 0 ? "DEVI" : "IN PARI"}
+                    </Text>
+                    <Money minor={Math.abs(netMinor)} currency={group.currency} colored={false} color={netMinor > 0 ? t.positive : netMinor < 0 ? t.negative : t.textMuted} size={font.h3} weight="800" />
+                  </View>
+                ) : null}
                 <Ionicons name="chevron-forward" size={18} color={t.textFaint} style={{ marginLeft: 6 }} />
               </View>
             </Card>
@@ -156,7 +163,7 @@ export default function HomeScreen() {
                 people={people}
                 selfId={self?.id}
                 groupName={groupsById.get(e.groupId)?.name}
-                onPress={() => router.push({ pathname: "/expense/[id]", params: { id: e.id } })}
+                onPress={() => router.push({ pathname: "/expense/[id]", params: { id: e.id, groupId: e.groupId } })}
                 last={i === recent.length - 1}
               />
             ))}
@@ -170,6 +177,16 @@ export default function HomeScreen() {
         items={activeGroups.map((g) => ({ value: g.id, label: `${g.emoji || "👥"}  ${g.name}`, subtitle: `${g.memberIds.length} persone · ${g.currency}` }))}
         onSelect={(id) => router.push({ pathname: "/expense/edit", params: { groupId: id } })}
         onClose={() => setPickGroup(false)}
+      />
+      <PickerSheet<"local" | "cloud">
+        visible={pickNewGroupKind}
+        title="Nuovo gruppo"
+        items={[
+          { value: "local", label: "Gruppo locale", subtitle: "Solo su questo telefono", leading: <Ionicons name="phone-portrait-outline" size={22} color={t.text} /> },
+          { value: "cloud", label: "Gruppo condiviso", subtitle: "In tempo reale con altre persone", leading: <Ionicons name="cloud-outline" size={22} color={t.text} /> },
+        ]}
+        onSelect={(v) => router.push(v === "local" ? "/group/edit" : "/group/share-new")}
+        onClose={() => setPickNewGroupKind(false)}
       />
     </Screen>
   );

@@ -10,10 +10,11 @@ import { CURRENCIES, currencyInfo, formatMinor, formatPlain, parseAmount } from 
 import { computeSplits, validatePayments, type SplitParticipant } from "@/domain/split";
 import type { Attachment, SplitMethod } from "@/domain/types";
 import { deleteAttachmentFile, saveAttachment } from "@/store/attachments";
+import { useGroupActions } from "@/store/groupActions";
 import { uuid } from "@/store/ids";
 import { fetchRate, rateKey } from "@/store/rates";
 import { useStore, type ExpenseInput } from "@/store/store";
-import { useExpense, useExpenseAttachments, useGroup, usePeopleMap, useSelf } from "@/store/selectors";
+import { useExpenseAttachments, useResolvedGroup, useSelf } from "@/store/selectors";
 import {
   AttachmentThumb,
   Avatar,
@@ -40,13 +41,13 @@ export default function ExpenseEditScreen() {
   const params = useLocalSearchParams<{ groupId?: string; id?: string }>();
   const router = useRouter();
   const t = useTheme();
-  const existing = useExpense(params.id);
-  const group = useGroup(existing?.groupId ?? params.groupId);
-  const people = usePeopleMap();
+  const resolved = useResolvedGroup(params.groupId);
+  const { group, people, authUser } = resolved;
+  const existing = params.id ? resolved.expenses.find((e) => e.id === params.id) : undefined;
   const self = useSelf();
+  const meId = group?.cloud ? authUser?.uid : self?.id;
+  const actions = useGroupActions(group);
   const rates = useStore((s) => s.data.settings.rates);
-  const addExpense = useStore((s) => s.addExpense);
-  const updateExpense = useStore((s) => s.updateExpense);
   const addAttachment = useStore((s) => s.addAttachment);
   const removeAttachment = useStore((s) => s.removeAttachment);
   const cacheRate = useStore((s) => s.cacheRate);
@@ -65,7 +66,7 @@ export default function ExpenseEditScreen() {
   const [rateBusy, setRateBusy] = useState(false);
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [payerMode, setPayerMode] = useState<PayerMode>(existing && existing.payers.length > 1 ? "multiple" : "single");
-  const [singlePayer, setSinglePayer] = useState<string | null>(existing?.payers[0]?.personId ?? (self && group?.memberIds.includes(self.id) ? self.id : members[0]?.id ?? null));
+  const [singlePayer, setSinglePayer] = useState<string | null>(existing?.payers[0]?.personId ?? (meId && group?.memberIds.includes(meId) ? meId : members[0]?.id ?? null));
   const [multiPayers, setMultiPayers] = useState<Record<string, string>>(() =>
     existing ? Object.fromEntries(existing.payers.map((p) => [p.personId, formatPlain(p.amountMinor, existing.currency)])) : {}
   );
@@ -227,7 +228,13 @@ export default function ExpenseEditScreen() {
 
     setSaving(true);
     try {
-      const expenseId = existing ? (updateExpense(existing.id, input), existing.id) : addExpense(input).id;
+      let expenseId: string;
+      if (existing) {
+        await actions.updateExpense(existing.id, input);
+        expenseId = existing.id;
+      } else {
+        expenseId = await actions.addExpense(input);
+      }
       for (const p of pending) {
         const id = uuid();
         const saved = await saveAttachment({ id, expenseId, sourceUri: p.sourceUri, fileName: p.fileName, mimeType: p.mimeType });

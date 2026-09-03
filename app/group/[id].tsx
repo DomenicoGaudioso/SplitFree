@@ -2,10 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { cloudDeleteGroupEntirely, cloudLeaveGroup } from "@/cloud/cloudGroup";
 import { formatIsoDate, monthKey, monthLabelLong } from "@/domain/dates";
 import { formatMinor } from "@/domain/money";
+import { useGroupActions } from "@/store/groupActions";
+import { useGroupFinance, useResolvedGroup, useSelf, useSyncCloudPointer } from "@/store/selectors";
 import { useStore } from "@/store/store";
-import { useGroup, useGroupExpenses, useGroupFinance, useGroupSettlements, usePeopleMap, useSelf } from "@/store/selectors";
 import {
   Avatar,
   AvatarStack,
@@ -20,33 +22,37 @@ import {
   Screen,
   SectionHeader,
   Segmented,
+  Tag,
   TransferRow,
 } from "@/ui/components";
-import { confirm } from "@/ui/dialogs";
+import { confirm, notify } from "@/ui/dialogs";
 import { font, spacing, useTheme } from "@/ui/theme";
 
 type Tab = "expenses" | "balances" | "settlements";
-type MenuAction = "edit" | "archive" | "delete";
+type LocalMenuAction = "edit" | "archive" | "delete";
+type CloudMenuAction = "invite" | "leave" | "deleteAll";
 
 export default function GroupDetailScreen() {
   const { id, tab: initialTab } = useLocalSearchParams<{ id: string; tab?: Tab }>();
   const router = useRouter();
   const t = useTheme();
-  const group = useGroup(id);
-  const people = usePeopleMap();
   const self = useSelf();
-  const expenses = useGroupExpenses(id);
-  const settlements = useGroupSettlements(id);
-  const finance = useGroupFinance(group);
-  const archiveGroup = useStore((s) => s.archiveGroup);
-  const deleteGroup = useStore((s) => s.deleteGroup);
+  const resolved = useResolvedGroup(id);
+  const { group, people, expenses, settlements, loading, error, authUser } = resolved;
+  useSyncCloudPointer(resolved);
+  const actions = useGroupActions(group);
+  const finance = useGroupFinance(group, expenses, settlements);
   const deleteSettlement = useStore((s) => s.deleteSettlement);
+  const deleteLocalPointer = useStore((s) => s.deleteGroup);
   const [tab, setTab] = useState<Tab>(initialTab ?? "expenses");
   const [menu, setMenu] = useState(false);
   const [simplified, setSimplified] = useState(true);
+  const [busyMenu, setBusyMenu] = useState(false);
 
+  const isCloud = !!group?.cloud;
   const members = useMemo(() => (group ? group.memberIds.map((m) => people.get(m)).filter((p): p is NonNullable<typeof p> => !!p) : []), [group, people]);
-  const myBalance = self ? finance.balances.find((b) => b.personId === self.id)?.netMinor ?? 0 : 0;
+  const meId = isCloud ? authUser?.uid : self?.id;
+  const myBalance = meId ? finance.balances.find((b) => b.personId === meId)?.netMinor ?? 0 : 0;
 
   const sections = useMemo(() => {
     const map = new Map<string, typeof expenses>();
@@ -66,22 +72,83 @@ export default function GroupDetailScreen() {
     );
   }
 
-  const onMenu = async (action: MenuAction) => {
+  if (isCloud && error === "not-signed-in") {
+    return (
+      <Screen>
+        <Stack.Screen options={{ title: group.name }} />
+        <Card>
+          <EmptyState
+            icon="log-in-outline"
+            title="Accedi per continuare"
+            message="Questo gruppo è condiviso: accedi con l'account con cui l'hai creato o con cui ti sei unito."
+            actionLabel="Vai alle impostazioni"
+            onAction={() => router.push("/settings")}
+          />
+        </Card>
+      </Screen>
+    );
+  }
+
+  const onLocalMenu = async (action: LocalMenuAction) => {
     if (action === "edit") router.push({ pathname: "/group/edit", params: { id: group.id } });
-    if (action === "archive") archiveGroup(group.id, !group.archivedAt);
+    if (action === "archive") void actions.archive(!group.archivedAt);
     if (action === "delete") {
       const ok = await confirm("Eliminare il gruppo?", `"${group.name}" con ${expenses.length} spese e ${settlements.length} rimborsi verrà eliminato definitivamente, allegati compresi.`, {
         confirmText: "Elimina",
         destructive: true,
       });
       if (ok) {
-        await deleteGroup(group.id);
+        await deleteLocalPointer(group.id);
         router.replace("/groups");
       }
     }
   };
 
+  const onCloudMenu = async (action: CloudMenuAction) => {
+    if (!group.cloud) return;
+    if (action === "invite") {
+      router.push({ pathname: "/group/invite", params: { id: group.id } });
+      return;
+    }
+    if (action === "leave") {
+      const ok = await confirm("Uscire dal gruppo?", `Non vedrai più "${group.name}". Le tue spese passate restano visibili agli altri membri.`, {
+        confirmText: "Esci",
+        destructive: true,
+      });
+      if (!ok || !authUser) return;
+      setBusyMenu(true);
+      try {
+        await cloudLeaveGroup(group.cloud, authUser.uid);
+        await deleteLocalPointer(group.id);
+        router.replace("/groups");
+      } catch (err) {
+        notify("Non riesco a uscire dal gruppo", String(err));
+      } finally {
+        setBusyMenu(false);
+      }
+      return;
+    }
+    if (action === "deleteAll") {
+      const ok = await confirm("Eliminare il gruppo per tutti?", `"${group.name}" verrà cancellato per ogni membro, spese e rimborsi compresi. Non si può annullare.`, {
+        confirmText: "Elimina per tutti",
+        destructive: true,
+      });
+      if (!ok) return;
+      setBusyMenu(true);
+      try {
+        await cloudDeleteGroupEntirely(group.cloud);
+        await deleteLocalPointer(group.id);
+        router.replace("/groups");
+      } catch (err) {
+        notify("Eliminazione non riuscita", String(err));
+      } finally {
+        setBusyMenu(false);
+      }
+    }
+  };
+
   const transfers = simplified ? finance.simplified : finance.pairwise;
+  const isOwner = isCloud && authUser && group.cloud?.ownerUid === authUser.uid;
 
   return (
     <View style={{ flex: 1 }}>
@@ -102,13 +169,18 @@ export default function GroupDetailScreen() {
               <Text style={{ fontSize: 30 }}>{group.emoji || "👥"}</Text>
             </View>
             <View style={{ flex: 1, marginLeft: spacing.md }}>
-              <Text style={{ color: t.text, fontSize: font.h2, fontWeight: "800" }} numberOfLines={2}>
-                {group.name}
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={{ color: t.text, fontSize: font.h2, fontWeight: "800", flexShrink: 1 }} numberOfLines={2}>
+                  {group.name}
+                </Text>
+                {isCloud ? <Tag label="condiviso" color={t.primary} /> : null}
+              </View>
               {group.description ? <Text style={{ color: t.textMuted, fontSize: font.small }}>{group.description}</Text> : null}
               <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <AvatarStack people={members} size={24} max={6} />
-                <Text style={{ color: t.textMuted, fontSize: font.small }}>{members.length} persone</Text>
+                <Text style={{ color: t.textMuted, fontSize: font.small }}>
+                  {loading ? "sincronizzazione…" : `${members.length} persone`}
+                </Text>
               </View>
             </View>
           </View>
@@ -158,7 +230,7 @@ export default function GroupDetailScreen() {
                 />
                 <Card padded={false}>
                   {items.map((e, i) => (
-                    <ExpenseRow key={e.id} expense={e} people={people} selfId={self?.id} onPress={() => router.push({ pathname: "/expense/[id]", params: { id: e.id } })} last={i === items.length - 1} />
+                    <ExpenseRow key={e.id} expense={e} people={people} selfId={meId} onPress={() => router.push({ pathname: "/expense/[id]", params: { id: e.id, groupId: e.groupId } })} last={i === items.length - 1} />
                   ))}
                 </Card>
               </View>
@@ -209,7 +281,7 @@ export default function GroupDetailScreen() {
                     transfer={tr}
                     people={people}
                     currency={group.currency}
-                    selfId={self?.id}
+                    selfId={meId}
                     onSettle={() =>
                       router.push({
                         pathname: "/settle/new",
@@ -262,7 +334,9 @@ export default function GroupDetailScreen() {
                             hitSlop={8}
                             onPress={async () => {
                               const ok = await confirm("Eliminare il rimborso?", "Il bilancio tornerà a considerare il debito come aperto.", { confirmText: "Elimina", destructive: true });
-                              if (ok) deleteSettlement(s.id);
+                              if (!ok) return;
+                              if (isCloud) await actions.deleteSettlement(s.id);
+                              else deleteSettlement(s.id);
                             }}
                           >
                             <Ionicons name="trash-outline" size={18} color={t.negative} />
@@ -279,17 +353,36 @@ export default function GroupDetailScreen() {
         ) : null}
       </Screen>
       <Fab label="Spesa" onPress={() => router.push({ pathname: "/expense/edit", params: { groupId: group.id } })} />
-      <PickerSheet<MenuAction>
-        visible={menu}
-        title={group.name}
-        items={[
-          { value: "edit", label: "Modifica gruppo", subtitle: "Nome, valuta, membri", leading: <Ionicons name="create-outline" size={22} color={t.text} /> },
-          { value: "archive", label: group.archivedAt ? "Ripristina" : "Archivia", subtitle: "Nascondi dalla lista principale", leading: <Ionicons name="archive-outline" size={22} color={t.text} /> },
-          { value: "delete", label: "Elimina gruppo", subtitle: "Cancella spese e rimborsi", leading: <Ionicons name="trash-outline" size={22} color={t.negative} /> },
-        ]}
-        onSelect={(a) => void onMenu(a)}
-        onClose={() => setMenu(false)}
-      />
+      {isCloud ? (
+        <PickerSheet<CloudMenuAction>
+          visible={menu}
+          title={group.name}
+          items={[
+            { value: "invite", label: "Invita persone", subtitle: "Genera un link di invito", leading: <Ionicons name="person-add-outline" size={22} color={t.text} /> },
+            { value: "leave", label: "Esci dal gruppo", subtitle: "Non vedrai più questo gruppo", leading: <Ionicons name="exit-outline" size={22} color={t.text} /> },
+            ...(isOwner
+              ? [{ value: "deleteAll" as const, label: "Elimina gruppo per tutti", subtitle: "Cancella tutto, per ogni membro", leading: <Ionicons name="trash-outline" size={22} color={t.negative} /> }]
+              : []),
+          ]}
+          onSelect={(a) => void onCloudMenu(a)}
+          onClose={() => setMenu(false)}
+        />
+      ) : (
+        <PickerSheet<LocalMenuAction>
+          visible={menu}
+          title={group.name}
+          items={[
+            { value: "edit", label: "Modifica gruppo", subtitle: "Nome, valuta, membri", leading: <Ionicons name="create-outline" size={22} color={t.text} /> },
+            { value: "archive", label: group.archivedAt ? "Ripristina" : "Archivia", subtitle: "Nascondi dalla lista principale", leading: <Ionicons name="archive-outline" size={22} color={t.text} /> },
+            { value: "delete", label: "Elimina gruppo", subtitle: "Cancella spese e rimborsi", leading: <Ionicons name="trash-outline" size={22} color={t.negative} /> },
+          ]}
+          onSelect={(a) => void onLocalMenu(a)}
+          onClose={() => setMenu(false)}
+        />
+      )}
+      {busyMenu ? (
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.05)" }]} />
+      ) : null}
     </View>
   );
 }

@@ -1,0 +1,93 @@
+rules_version = '2';
+
+// Regole di sicurezza per i gruppi condivisi di SplitFree.
+// Vanno incollate nella console Firebase (Firestore Database → Regole) del
+// progetto collegato come amministratore, oppure pubblicate con:
+//   firebase deploy --only firestore:rules
+//
+// Modello: ogni gruppo ha una sottocollezione "members" (un documento per
+// utente, id = uid di Firebase Auth). Un utente è "membro" solo se esiste il
+// suo documento in quella sottocollezione. Gli inviti sono documenti in una
+// collezione separata "invites/{code}": il "code" stesso è il segreto (le
+// regole vietano di elencare la collezione, si può solo leggere un
+// documento di cui si conosce già l'id).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(groupId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // Chi crea il gruppo (il documento gruppo esiste già: viene scritto
+    // subito prima, in una richiesta separata) può creare la propria scheda
+    // membro senza bisogno di un invito.
+    function isGroupOwner(groupId, uid) {
+      return get(/databases/$(database)/documents/groups/$(groupId)).data.ownerUid == uid;
+    }
+
+    // Un invito valido per questo gruppo, il cui codice è indicato nel
+    // documento membro che si sta creando (campo "usedInviteCode").
+    function hasValidInvite(groupId) {
+      let code = request.resource.data.usedInviteCode;
+      let invitePath = /databases/$(database)/documents/invites/$(code);
+      return code is string &&
+        exists(invitePath) &&
+        get(invitePath).data.groupId == groupId &&
+        get(invitePath).data.active == true;
+    }
+
+    match /groups/{groupId} {
+      allow read: if isMember(groupId);
+      // Solo chi crea il gruppo (diventa proprietario) può crearlo.
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isMember(groupId);
+      // Solo chi ha creato il gruppo può eliminarlo per tutti (lato app:
+      // cloudDeleteGroupEntirely cancella prima le sottocollezioni, poi
+      // questo documento).
+      allow delete: if isGroupOwner(groupId, request.auth.uid);
+
+      match /members/{uid} {
+        allow read: if isMember(groupId);
+        // Un utente può aggiungere SE STESSO: chi crea il gruppo (ne è già
+        // proprietario) senza bisogno di altro, chiunque altro solo
+        // presentando un invito attivo per questo gruppo.
+        allow create: if isSelf(uid) && (isGroupOwner(groupId, uid) || hasValidInvite(groupId));
+        allow update: if isSelf(uid);
+        // Uscire dal gruppo (cancellare la propria scheda) o essere membri
+        // per rimuovere qualcun altro durante l'eliminazione totale.
+        allow delete: if isSelf(uid) || isMember(groupId);
+      }
+
+      match /expenses/{expenseId} {
+        allow read, write: if isMember(groupId);
+      }
+
+      match /settlements/{settlementId} {
+        allow read, write: if isMember(groupId);
+      }
+    }
+
+    match /invites/{code} {
+      // Il "code" è il segreto: chi lo conosce (arrivato dal link di invito)
+      // può leggerlo, ma la collezione non è elencabile.
+      allow get: if signedIn();
+      allow list: if false;
+      // Solo un membro del gruppo può creare un invito per quel gruppo
+      // (altrimenti chiunque abbia un account sul progetto potrebbe
+      // autoinvitarsi in un gruppo altrui creando un invito fasullo).
+      allow create, update: if signedIn() &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        isMember(request.resource.data.groupId);
+    }
+  }
+}

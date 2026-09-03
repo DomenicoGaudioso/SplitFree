@@ -41,7 +41,8 @@
           "cameraPermission": "SplitFree usa la fotocamera per fotografare ricevute da allegare alle spese."
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": false

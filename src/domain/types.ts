@@ -16,6 +16,46 @@ export type Person = {
   updatedAt: string;
 };
 
+/**
+ * Configurazione pubblica di un progetto Firebase (non è un segreto: la
+ * sicurezza dei dati è garantita dalle regole di Firestore, non da questi
+ * valori). Serve per collegare l'app al progetto cloud dell'amministratore
+ * di un gruppo condiviso.
+ */
+export type FirebaseWebConfig = {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId: string;
+};
+
+/**
+ * Un progetto Firebase collegato da questo dispositivo in qualità di
+ * amministratore: può ospitare più gruppi condivisi.
+ */
+export type CloudProject = {
+  id: string;
+  label: string;
+  config: FirebaseWebConfig;
+  /** Web Client ID OAuth di Google Cloud, per l'accesso "Continua con Google". */
+  googleClientId?: string;
+  /** Application (client) ID di una registrazione app Azure, per "Continua con Microsoft". */
+  microsoftClientId?: string;
+  createdAt: string;
+};
+
+/** Collega un gruppo locale al suo gemello su Firestore. Auto-contenuto: chi si unisce via invito non deve possedere il progetto. */
+export type GroupCloudLink = {
+  config: FirebaseWebConfig;
+  googleClientId?: string;
+  microsoftClientId?: string;
+  /** Id del documento Firestore (di solito uguale a Group.id). */
+  remoteId: string;
+  ownerUid: string;
+};
+
 export type Group = {
   id: string;
   name: string;
@@ -26,6 +66,8 @@ export type Group = {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Presente solo per i gruppi condivisi: dati sincronizzati in tempo reale su Firestore. */
+  cloud?: GroupCloudLink | null;
 };
 
 export type Payment = {
@@ -98,6 +140,8 @@ export type Settings = {
   theme: ThemePreference;
   /** Cache tassi: chiave "EUR>USD". */
   rates: Record<string, RateCacheEntry>;
+  /** Progetti Firebase collegati da questo dispositivo come amministratore. */
+  cloudProjects: CloudProject[];
 };
 
 export const DATA_VERSION = 1;

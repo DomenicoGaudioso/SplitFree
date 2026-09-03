@@ -28,6 +28,7 @@ export function emptyData(): AppData {
       defaultCurrency: "EUR",
       theme: "system",
       rates: {},
+      cloudProjects: [],
     },
   };
 }
@@ -41,7 +42,13 @@ export function migrate(raw: unknown): AppData {
     version: DATA_VERSION,
     people: Array.isArray(r.people) ? r.people : [],
     groups: Array.isArray(r.groups)
-      ? r.groups.map((g) => ({ ...g, emoji: g.emoji ?? "", description: g.description ?? "", memberIds: g.memberIds ?? [] }))
+      ? r.groups.map((g) => ({
+          ...g,
+          emoji: g.emoji ?? "",
+          description: g.description ?? "",
+          memberIds: g.memberIds ?? [],
+          cloud: g.cloud ?? null,
+        }))
       : [],
     expenses: Array.isArray(r.expenses)
       ? r.expenses.map((e) => ({
@@ -54,7 +61,12 @@ export function migrate(raw: unknown): AppData {
       : [],
     settlements: Array.isArray(r.settlements) ? r.settlements : [],
     attachments: Array.isArray(r.attachments) ? r.attachments : [],
-    settings: { ...base.settings, ...(r.settings ?? {}), rates: r.settings?.rates ?? {} },
+    settings: {
+      ...base.settings,
+      ...(r.settings ?? {}),
+      rates: r.settings?.rates ?? {},
+      cloudProjects: r.settings?.cloudProjects ?? [],
+    },
   };
 }
 

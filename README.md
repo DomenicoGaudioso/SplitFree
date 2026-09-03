@@ -1,10 +1,11 @@
 # SplitFree
 
-App per dividere le spese in stile Splitwise: **gratuita, open source, senza pubblicità, senza account e senza cloud**. Tutto resta sul dispositivo. Funziona su **Android** (APK) e su **Mac** (app desktop), con lo stesso codice.
+App per dividere le spese in stile Splitwise: **gratuita, open source, senza pubblicità**. Un gruppo può restare **solo locale** (tutto sul dispositivo, come sempre) oppure diventare **condiviso**: allora si sincronizza in tempo reale con le altre persone tramite un progetto Firebase gratuito collegato da chi lo amministra. Funziona su **Android** (APK) e su **Mac** (app desktop), con lo stesso codice.
 
 ## Funzionalità
 
-- **Gruppi e persone locali**: vacanze, coinquilini, cene. Le persone sono schede locali, non serve che abbiano l'app.
+- **Gruppi locali o condivisi**: un gruppo locale resta solo sul telefono, come sempre; uno condiviso vive in tempo reale su Firestore e si invita altra gente con un link (vedi [Gruppi condivisi](#gruppi-condivisi-in-tempo-reale) sotto).
+- **Persone locali**: nei gruppi locali sono schede sul dispositivo, non serve che abbiano l'app.
 - **Spese con icona automatica**: l'icona (e la categoria) viene dedotta dal titolo. "Pizza da Gino" mostra una pizza, "Benzina" un'auto, "Hotel Bologna" un letto. Si può sempre cambiare a mano.
 - **Motore di divisione** con arrotondamento esatto al centesimo (metodo del massimo resto):
   - parti uguali;
@@ -36,12 +37,52 @@ Ogni tag `v*` pubblicato sul repo fa partire la build e crea la release con i fi
 |---|---|
 | UI | React Native + Expo SDK 57, TypeScript strict, Expo Router |
 | Stato | Zustand, con salvataggio automatico dopo ogni modifica |
-| Dati | File JSON nella cartella privata dell'app (Android); localStorage + IndexedDB (web/Mac) |
+| Dati locali | File JSON nella cartella privata dell'app (Android); localStorage + IndexedDB (web/Mac) |
+| Dati condivisi | Firestore + Firebase Auth, un progetto per amministratore (nessun backend gestito da SplitFree) |
 | Motore finanziario | `src/domain/` puro TypeScript, testato con Vitest |
 | Grafici | react-native-svg (nessuna libreria di charting) |
 | Desktop | Electron che incapsula la build web statica |
 
 Tutti gli importi sono interi in unità minori (centesimi): niente errori in virgola mobile.
+
+## Gruppi condivisi (in tempo reale)
+
+Un gruppo condiviso non ha un server gestito da SplitFree: usa il **progetto Firebase gratuito** (piano Spark, nessuna carta di credito) di chi lo amministra. I membri entrano con il proprio account **Google** o **Microsoft**, tramite Firebase Authentication collegato a quello stesso progetto.
+
+### Passi per l'amministratore (una volta sola)
+
+1. **Crea un progetto** su [console.firebase.google.com](https://console.firebase.google.com) (gratuito).
+2. **Attiva Firestore Database** (modalità produzione va bene: le regole sono quelle sotto).
+3. **Aggiungi un'app Web** al progetto (icona `</>`): la console mostra uno snippet `firebaseConfig` da copiare.
+4. In SplitFree, **Impostazioni → Gruppi condivisi → Collega un progetto Firebase**: incolla quello snippet.
+5. **Pubblica le regole di sicurezza**: copia il contenuto di [`firestore.rules`](firestore.rules) nella console (Firestore Database → Regole) e pubblica, oppure con la Firebase CLI:
+   ```bash
+   firebase deploy --only firestore:rules --project <id-del-progetto>
+   ```
+6. Per far entrare le persone con **Google**: Authentication → Sign-in method → attiva "Google". La console genera un **Web Client ID**: incollalo nel progetto collegato in SplitFree (Impostazioni → Modifica → "Google Web Client ID").
+7. Per farle entrare con **Microsoft** (account personali o aziendali, entrambi gratuiti): crea una [App registration su Azure](https://portal.azure.com) (Microsoft Entra ID → App registrations → New registration, tipo di account "Account in qualsiasi directory organizzativa e account Microsoft personali"), aggiungi come redirect URI `splitfree://` (piattaforma "Web" o "Public client"), poi in Firebase Authentication → Sign-in method → aggiungi provider OIDC personalizzato con id `microsoft.com` e lo stesso Application (client) ID; incolla l'ID anche nel progetto collegato in SplitFree.
+
+Da qui, **Gruppi → Nuovo gruppo → Gruppo condiviso** crea il gruppo su quel progetto, e dal dettaglio del gruppo **Invita persone** genera un link (`splitfree://join?...`) da mandare a chiunque: chi ce l'ha e ha già installato SplitFree lo apre, accede con Google o Microsoft ed entra.
+
+### Cosa succede sotto: schema Firestore
+
+```
+groups/{groupId}                     nome, valuta, proprietario
+groups/{groupId}/members/{uid}       persone collegate (id = uid Firebase Auth)
+groups/{groupId}/expenses/{id}       spese
+groups/{groupId}/settlements/{id}    rimborsi
+invites/{code}                       inviti (il "code" stesso è il segreto)
+```
+
+Le regole (`firestore.rules`) fanno rispettare: solo l'amministratore crea/elimina il gruppo; solo un membro può generare inviti per quel gruppo; ci si aggiunge da soli solo presentando un invito attivo o essendo il proprietario; solo i membri leggono/scrivono spese e rimborsi.
+
+### Limiti di questa prima versione
+
+- Gli **allegati** (foto/PDF delle ricevute) restano solo locali anche nei gruppi condivisi: non vengono sincronizzati agli altri membri.
+- Non c'è ancora una schermata per **rinominare** un gruppo condiviso dopo la creazione (il motore lo supporta: `cloudUpdateGroupInfo`).
+- Se sei membro di gruppi condivisi su **progetti Firebase di amministratori diversi**, l'accesso è per progetto: potresti dover accedere più di una volta.
+- Home e la lista Gruppi mostrano nome/persone dei gruppi condivisi con gli ultimi dati visti (si aggiornano aprendo il dettaglio del gruppo); i bilanci "in tempo reale" veri sono nella schermata di dettaglio.
+- L'eliminazione totale di un gruppo condiviso cancella le sue sottocollezioni una per una (Firestore non supporta l'eliminazione ricorsiva lato client in un'unica operazione atomica): in rari casi di connessione interrotta a metà può restare qualche documento orfano.
 
 ## Struttura
 

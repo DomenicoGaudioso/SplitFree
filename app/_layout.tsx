@@ -46,10 +46,13 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="group/[id]" options={{ title: "" }} />
         <Stack.Screen name="group/edit" options={{ title: "Gruppo" }} />
+        <Stack.Screen name="group/share-new" options={{ title: "Nuovo gruppo condiviso" }} />
+        <Stack.Screen name="group/invite" options={{ title: "Invita persone" }} />
         <Stack.Screen name="expense/edit" options={{ title: "Spesa" }} />
         <Stack.Screen name="expense/[id]" options={{ title: "Dettaglio spesa" }} />
         <Stack.Screen name="settle/new" options={{ title: "Registra rimborso" }} />
         <Stack.Screen name="person/edit" options={{ title: "Persona" }} />
+        <Stack.Screen name="join/index" options={{ title: "Unisciti a un gruppo" }} />
       </Stack>
     </SafeAreaProvider>
   );

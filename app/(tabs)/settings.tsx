@@ -1,24 +1,58 @@
 import Constants from "expo-constants";
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Platform, Text, View } from "react-native";
+import { parseFirebaseConfigSnippet } from "@/cloud/configParse";
 import { CURRENCIES } from "@/domain/money";
 import type { ThemePreference } from "@/domain/types";
 import { exportBackup, pickBackup } from "@/store/backup";
 import { flushWrites } from "@/store/persistence";
 import { useStore } from "@/store/store";
-import { Button, Card, ListRow, Screen, SectionHeader, Segmented, SelectField, TextField } from "@/ui/components";
+import {
+  Button,
+  Card,
+  CloudProjectCard,
+  EmptyState,
+  ListRow,
+  Screen,
+  SectionHeader,
+  Segmented,
+  SelectField,
+  TextField,
+} from "@/ui/components";
 import { confirm, notify } from "@/ui/dialogs";
 import { font, spacing, useTheme } from "@/ui/theme";
 
 export default function SettingsScreen() {
   const t = useTheme();
+  const router = useRouter();
   const settings = useStore((s) => s.data.settings);
   const data = useStore((s) => s.data);
   const updateSettings = useStore((s) => s.updateSettings);
   const replaceAll = useStore((s) => s.replaceAll);
   const resetAll = useStore((s) => s.resetAll);
+  const addCloudProject = useStore((s) => s.addCloudProject);
+  const updateCloudProject = useStore((s) => s.updateCloudProject);
+  const removeCloudProject = useStore((s) => s.removeCloudProject);
   const [name, setName] = useState(settings.ownerName || data.people.find((p) => p.isSelf)?.name || "");
   const [busy, setBusy] = useState(false);
+  const [addingProject, setAddingProject] = useState(false);
+  const [projectLabel, setProjectLabel] = useState("");
+  const [configText, setConfigText] = useState("");
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  const saveProject = () => {
+    const config = parseFirebaseConfigSnippet(configText);
+    if (!config) {
+      setConfigError("Non trovo apiKey, authDomain, projectId e appId in questo testo. Incolla lo snippet di configurazione da Firebase (Impostazioni progetto → Le tue app → Configurazione).");
+      return;
+    }
+    addCloudProject({ label: projectLabel || config.projectId, config });
+    setProjectLabel("");
+    setConfigText("");
+    setConfigError(null);
+    setAddingProject(false);
+  };
 
   useEffect(() => {
     const self = data.people.find((p) => p.isSelf);
@@ -105,6 +139,53 @@ export default function SettingsScreen() {
           <Button title="Importa backup" icon="folder-open-outline" variant="secondary" onPress={onImport} />
         </View>
         <Text style={{ color: t.textFaint, fontSize: font.tiny, marginTop: spacing.md }}>{counts}</Text>
+      </Card>
+
+      <SectionHeader
+        title="Gruppi condivisi"
+        right={<Button title="Ho un invito" size="sm" variant="ghost" icon="link" onPress={() => router.push("/join")} />}
+      />
+      <Card>
+        <Text style={{ color: t.textMuted, fontSize: font.small, lineHeight: 20, marginBottom: spacing.md }}>
+          Per dividere le spese in tempo reale con altre persone, collega qui un tuo progetto Firebase gratuito: diventerai l'amministratore, i membri entreranno con un link di invito usando il proprio account Google o Microsoft. I gruppi solo tuoi restano offline come sempre.
+        </Text>
+        {settings.cloudProjects.length === 0 ? (
+          <EmptyState icon="cloud-outline" title="Nessun progetto collegato" message="Serve solo la prima volta che vuoi creare un gruppo condiviso." />
+        ) : (
+          settings.cloudProjects.map((p) => (
+            <CloudProjectCard
+              key={p.id}
+              project={p}
+              onUpdate={(patch) => updateCloudProject(p.id, patch)}
+              onRemove={() => removeCloudProject(p.id)}
+            />
+          ))
+        )}
+        {addingProject ? (
+          <View>
+            <TextField label="Nome (facoltativo)" value={projectLabel} onChangeText={setProjectLabel} placeholder="Es. Il mio Firebase" />
+            <TextField
+              label="Configurazione Firebase"
+              value={configText}
+              onChangeText={(v) => {
+                setConfigText(v);
+                setConfigError(null);
+              }}
+              placeholder={"Incolla qui lo snippet da\nImpostazioni progetto → Le tue app"}
+              multiline
+              numberOfLines={5}
+              autoCapitalize="none"
+              style={{ minHeight: 100, textAlignVertical: "top" }}
+              error={configError}
+            />
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              <Button title="Collega" onPress={saveProject} />
+              <Button title="Annulla" variant="secondary" onPress={() => setAddingProject(false)} />
+            </View>
+          </View>
+        ) : (
+          <Button title="Collega un progetto Firebase" icon="add" variant="secondary" onPress={() => setAddingProject(true)} />
+        )}
       </Card>
 
       <SectionHeader title="Informazioni" />

@@ -7,8 +7,8 @@ import { categoryById, iconForExpense } from "@/domain/categories";
 import { formatIsoDate } from "@/domain/dates";
 import { convertMinor, formatMinor } from "@/domain/money";
 import { attachmentFileUri, isImageMime } from "@/store/attachments";
-import { useStore } from "@/store/store";
-import { useExpense, useExpenseAttachments, useGroup, usePeopleMap, useSelf } from "@/store/selectors";
+import { useGroupActions } from "@/store/groupActions";
+import { useExpense, useExpenseAttachments, useGroup, usePeopleMap, useResolvedGroup } from "@/store/selectors";
 import { AttachmentThumb, Avatar, Button, Card, EmptyState, IconBadge, ListRow, Money, Overlay, Screen, SectionHeader, Tag } from "@/ui/components";
 import { confirm, notify } from "@/ui/dialogs";
 import { font, spacing, useTheme } from "@/ui/theme";
@@ -16,15 +16,20 @@ import { font, spacing, useTheme } from "@/ui/theme";
 const METHOD_LABEL = { equal: "in parti uguali", percentage: "per percentuali", shares: "per quote", exact: "importi esatti" } as const;
 
 export default function ExpenseDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, groupId } = useLocalSearchParams<{ id: string; groupId?: string }>();
   const router = useRouter();
   const t = useTheme();
-  const expense = useExpense(id);
-  const group = useGroup(expense?.groupId);
-  const people = usePeopleMap();
-  const self = useSelf();
+  // Con groupId (sempre passato dai link interni) i dati vengono da useResolvedGroup,
+  // valido sia per gruppi locali sia condivisi; senza (link vecchi/esterni) si prova solo il percorso locale.
+  const resolved = useResolvedGroup(groupId);
+  const localExpense = useExpense(groupId ? undefined : id);
+  const localGroup = useGroup(groupId ? undefined : localExpense?.groupId);
+  const localPeople = usePeopleMap();
+  const group = groupId ? resolved.group : localGroup;
+  const expense = groupId ? resolved.expenses.find((e) => e.id === id) : localExpense;
+  const people = groupId ? resolved.people : localPeople;
+  const actions = useGroupActions(group);
   const attachments = useExpenseAttachments(expense?.id);
-  const deleteExpense = useStore((s) => s.deleteExpense);
   const [viewer, setViewer] = useState<string | null>(null);
 
   if (!expense || !group) {
@@ -39,13 +44,14 @@ export default function ExpenseDetailScreen() {
   const cat = categoryById(expense.categoryId);
   const icon = iconForExpense(expense.title, expense.categoryId);
   const foreign = expense.currency !== group.currency;
+  const self = [...people.values()].find((p) => p.isSelf);
   const mine = self ? expense.splits.find((s) => s.personId === self.id)?.amountMinor ?? 0 : 0;
   const paidByMe = self ? expense.payers.find((p) => p.personId === self.id)?.amountMinor ?? 0 : 0;
 
   const onDelete = async () => {
     const ok = await confirm("Eliminare la spesa?", `"${expense.title}" e i suoi ${attachments.length} allegati verranno eliminati.`, { confirmText: "Elimina", destructive: true });
     if (!ok) return;
-    await deleteExpense(expense.id);
+    await actions.deleteExpense(expense.id);
     router.back();
   };
 
@@ -147,7 +153,7 @@ export default function ExpenseDetailScreen() {
       </Card>
 
       <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm }}>
-        <Button title="Modifica" icon="create-outline" size="lg" onPress={() => router.push({ pathname: "/expense/edit", params: { id: expense.id } })} style={{ flex: 1 }} />
+        <Button title="Modifica" icon="create-outline" size="lg" onPress={() => router.push({ pathname: "/expense/edit", params: { id: expense.id, groupId: group.id } })} style={{ flex: 1 }} />
         <Button title="Elimina" icon="trash-outline" variant="danger" size="lg" onPress={onDelete} />
       </View>
 

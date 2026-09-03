@@ -3,22 +3,23 @@ import { useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { todayIso } from "@/domain/dates";
 import { currencyInfo, formatPlain, parseAmount } from "@/domain/money";
-import { useStore } from "@/store/store";
-import { useGroup, usePeopleMap, useSelf } from "@/store/selectors";
+import { useGroupActions } from "@/store/groupActions";
+import { useResolvedGroup } from "@/store/selectors";
 import { Avatar, Button, Card, DateField, Screen, SelectField, TextField } from "@/ui/components";
+import { notify } from "@/ui/dialogs";
 import { font, spacing, useTheme } from "@/ui/theme";
 
 export default function SettleScreen() {
   const params = useLocalSearchParams<{ groupId: string; from?: string; to?: string; amount?: string }>();
   const router = useRouter();
   const t = useTheme();
-  const group = useGroup(params.groupId);
-  const people = usePeopleMap();
-  const self = useSelf();
-  const addSettlement = useStore((s) => s.addSettlement);
+  const { group, people, authUser } = useResolvedGroup(params.groupId);
+  const actions = useGroupActions(group);
+  const [saving, setSaving] = useState(false);
 
   const members = useMemo(() => (group ? group.memberIds.map((m) => people.get(m)).filter((p): p is NonNullable<typeof p> => !!p) : []), [group, people]);
-  const [from, setFrom] = useState<string | null>(params.from ?? (self && group?.memberIds.includes(self.id) ? self.id : null));
+  const meId = group?.cloud ? authUser?.uid : [...people.values()].find((p) => p.isSelf)?.id;
+  const [from, setFrom] = useState<string | null>(params.from ?? (meId && group?.memberIds.includes(meId) ? meId : null));
   const [to, setTo] = useState<string | null>(params.to ?? null);
   const [amountText, setAmountText] = useState(params.amount && group ? formatPlain(Number(params.amount), group.currency) : "");
   const [date, setDate] = useState(todayIso());
@@ -35,13 +36,20 @@ export default function SettleScreen() {
 
   const items = members.map((p) => ({ value: p.id, label: p.isSelf ? `${p.name} (tu)` : p.name, leading: <Avatar person={p} size={28} /> }));
 
-  const save = () => {
+  const save = async () => {
     const minor = parseAmount(amountText, group.currency);
     if (!from || !to) return setError("Scegli chi paga e chi riceve.");
     if (from === to) return setError("Le due persone devono essere diverse.");
     if (minor === null || minor <= 0) return setError("Inserisci un importo valido.");
-    addSettlement({ groupId: group.id, fromPersonId: from, toPersonId: to, amountMinor: minor, date, note: note.trim() });
-    router.back();
+    setSaving(true);
+    try {
+      await actions.addSettlement({ fromPersonId: from, toPersonId: to, amountMinor: minor, date, note: note.trim() });
+      router.back();
+    } catch (err) {
+      notify("Registrazione non riuscita", String(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -65,7 +73,7 @@ export default function SettleScreen() {
         {error ? <Text style={{ color: t.negative, marginBottom: spacing.sm }}>{error}</Text> : null}
       </Card>
       <View style={{ flexDirection: "row", gap: spacing.sm }}>
-        <Button title="Registra" icon="checkmark" size="lg" onPress={save} style={{ flex: 1 }} />
+        <Button title="Registra" icon="checkmark" size="lg" onPress={() => void save()} loading={saving} style={{ flex: 1 }} />
         <Button title="Annulla" variant="secondary" size="lg" onPress={() => router.back()} />
       </View>
     </Screen>
