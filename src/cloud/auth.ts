@@ -41,19 +41,34 @@ export function authFor(config: FirebaseWebConfig): Auth {
   return auth;
 }
 
+export type CloudAuthProvider = "google" | "microsoft" | "email" | "anonymous" | "other";
+
 export type CloudAuthUser = {
   uid: string;
   name: string;
   email: string | null;
   photoUrl: string | null;
+  provider?: CloudAuthProvider;
+  isAnonymous?: boolean;
 };
+
+function getProviderType(user: User): CloudAuthProvider {
+  if (user.isAnonymous) return "anonymous";
+  const id = user.providerData?.[0]?.providerId;
+  if (id === "google.com") return "google";
+  if (id === "microsoft.com") return "microsoft";
+  if (id === "password") return "email";
+  return "other";
+}
 
 function toAuthUser(user: User): CloudAuthUser {
   return {
     uid: user.uid,
-    name: user.displayName ?? user.email ?? "Utente",
+    name: user.displayName ?? user.email ?? (user.isAnonymous ? "Ospite" : "Utente"),
     email: user.email,
     photoUrl: user.photoURL,
+    provider: getProviderType(user),
+    isAnonymous: user.isAnonymous,
   };
 }
 
@@ -77,3 +92,58 @@ export function useCloudAuthUser(config: FirebaseWebConfig | null | undefined): 
 export async function signOutOfProject(config: FirebaseWebConfig): Promise<void> {
   await firebaseSignOut(authFor(config));
 }
+
+/**
+ * Traduce gli errori Firebase Auth comuni in messaggi chiari in italiano.
+ */
+export function formatAuthError(error: unknown): string {
+  const msg = String(error);
+  if (msg.includes("auth/invalid-email")) return "L'indirizzo email non è valido.";
+  if (msg.includes("auth/user-not-found") || msg.includes("auth/wrong-password") || msg.includes("auth/invalid-credential")) {
+    return "Email o password errata.";
+  }
+  if (msg.includes("auth/email-already-in-use")) return "Questa email è già registrata. Prova ad accedere.";
+  if (msg.includes("auth/weak-password")) return "La password deve contenere almeno 6 caratteri.";
+  if (msg.includes("auth/too-many-requests")) return "Troppi tentativi falliti. Riprova tra qualche minuto.";
+  if (msg.includes("auth/network-request-failed")) return "Errore di connessione. Verifica la tua rete.";
+  return msg.replace(/^FirebaseError:\s*/, "");
+}
+
+/** Accesso con Email e Password */
+export async function signInWithEmail(config: FirebaseWebConfig, email: string, pass: string): Promise<CloudAuthUser> {
+  const auth = authFor(config);
+  const cred = await FirebaseAuth.signInWithEmailAndPassword(auth, email.trim(), pass);
+  return toAuthUser(cred.user);
+}
+
+/** Registrazione con Email e Password */
+export async function signUpWithEmail(
+  config: FirebaseWebConfig,
+  email: string,
+  pass: string,
+  displayName?: string
+): Promise<CloudAuthUser> {
+  const auth = authFor(config);
+  const cred = await FirebaseAuth.createUserWithEmailAndPassword(auth, email.trim(), pass);
+  if (displayName && displayName.trim()) {
+    await FirebaseAuth.updateProfile(cred.user, { displayName: displayName.trim() });
+  }
+  return toAuthUser(cred.user);
+}
+
+/** Accesso rapido come Ospite (anonimo) */
+export async function signInAsGuest(config: FirebaseWebConfig, displayName?: string): Promise<CloudAuthUser> {
+  const auth = authFor(config);
+  const cred = await FirebaseAuth.signInAnonymously(auth);
+  if (displayName && displayName.trim()) {
+    await FirebaseAuth.updateProfile(cred.user, { displayName: displayName.trim() });
+  }
+  return toAuthUser(cred.user);
+}
+
+/** Reset password via email */
+export async function sendPasswordReset(config: FirebaseWebConfig, email: string): Promise<void> {
+  const auth = authFor(config);
+  await FirebaseAuth.sendPasswordResetEmail(auth, email.trim());
+}
+

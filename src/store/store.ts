@@ -3,6 +3,7 @@ import type {
   AppData,
   Attachment,
   CloudProject,
+  CloudStorageService,
   Expense,
   FirebaseWebConfig,
   Group,
@@ -15,6 +16,7 @@ import type {
 } from "@/domain/types";
 import { DEFAULT_CATEGORY_ID } from "@/domain/categories";
 import { normalizeEmail } from "@/domain/validate";
+import { getDefaultCloudProject } from "@/cloud/defaultConfig";
 import { deleteExpenseAttachmentFiles } from "./attachments";
 import { nowIso, uuid } from "./ids";
 import { emptyData, loadData, saveData } from "./persistence";
@@ -73,6 +75,7 @@ type Store = {
   removeAttachment: (id: string) => void;
 
   updateSettings: (patch: Partial<Settings>) => void;
+  updateCloudStorage: (service: "oneDrive" | "googleDrive", patch: Partial<CloudStorageService>) => void;
   cacheRate: (from: string, to: string, rate: number) => void;
 
   addCloudProject: (input: { label: string; config: FirebaseWebConfig; googleClientId?: string; microsoftClientId?: string }) => CloudProject;
@@ -112,6 +115,20 @@ function ensureSelf(data: AppData): AppData {
   return { ...data, people: [self, ...data.people] };
 }
 
+function ensureDefaults(data: AppData): AppData {
+  let res = ensureSelf(data);
+  if (!res.settings.cloudProjects || res.settings.cloudProjects.length === 0) {
+    res = {
+      ...res,
+      settings: {
+        ...res.settings,
+        cloudProjects: [getDefaultCloudProject()],
+      },
+    };
+  }
+  return res;
+}
+
 export const useStore = create<Store>((set, get) => {
   const commit = (updater: (d: AppData) => AppData) => {
     const next = updater(get().data);
@@ -121,11 +138,11 @@ export const useStore = create<Store>((set, get) => {
   };
 
   return {
-    data: emptyData(),
+    data: ensureDefaults(emptyData()),
     hydrated: false,
 
     hydrate: async () => {
-      const loaded = ensureSelf(await loadData());
+      const loaded = ensureDefaults(await loadData());
       set({ data: loaded, hydrated: true });
       schedulePersist(loaded);
     },
@@ -303,6 +320,22 @@ export const useStore = create<Store>((set, get) => {
         }
         return { ...d, settings, people };
       });
+    },
+
+    updateCloudStorage: (service, patch) => {
+      commit((d) => ({
+        ...d,
+        settings: {
+          ...d.settings,
+          cloudStorage: {
+            ...d.settings.cloudStorage,
+            [service]: {
+              ...(d.settings.cloudStorage?.[service] ?? { connected: false }),
+              ...patch,
+            },
+          },
+        },
+      }));
     },
 
     cacheRate: (from, to, rate) => {

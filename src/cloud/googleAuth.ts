@@ -1,34 +1,22 @@
 import { useState } from "react";
+import { Platform } from "react-native";
 import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
-import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
-import { authFor } from "./auth";
+import { GoogleAuthProvider, signInWithCredential, signInWithPopup } from "firebase/auth";
+import { authFor, formatAuthError } from "./auth";
+import { DEFAULT_GOOGLE_CLIENT_ID } from "./defaultConfig";
 import type { FirebaseWebConfig } from "@/domain/types";
 
 WebBrowser.maybeCompleteAuthSession();
 
 export type SignInState = "idle" | "loading" | "error";
 
-/**
- * Accesso "Continua con Google" per un progetto Firebase.
- * Serve il Web Client ID OAuth generato da Firebase quando si attiva il
- * provider Google (Authentication → Sign-in method → Google, poi la chiave
- * è nella console di Google Cloud sotto "Credenziali").
- */
-// expo-auth-session's Google provider lancia in fase di render se non trova
-// ALCUN client id (per qualunque piattaforma): questo valore segnaposto
-// evita il crash finché non ne è stato configurato uno vero. `available`
-// resta `false` in quel caso, quindi non viene mai usato per un vero accesso.
-const NO_CLIENT_ID = "not-configured.apps.googleusercontent.com";
-
 export function useGoogleSignIn(config: FirebaseWebConfig | null, clientId: string | null | undefined) {
   const [state, setState] = useState<SignInState>("idle");
   const [error, setError] = useState<string | null>(null);
-  // Il provider Google richiede il client id nel campo specifico della piattaforma
-  // corrente (webClientId su web, androidClientId su Android, ecc.): usiamo lo
-  // stesso Web Client ID ovunque, com'è tipico per il flusso AuthSession basato
-  // su redirect a schema personalizzato invece delle SDK native.
-  const effectiveClientId = clientId ?? NO_CLIENT_ID;
+
+  const effectiveClientId = clientId || DEFAULT_GOOGLE_CLIENT_ID;
+
   const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
     clientId: effectiveClientId,
     webClientId: effectiveClientId,
@@ -37,12 +25,35 @@ export function useGoogleSignIn(config: FirebaseWebConfig | null, clientId: stri
   });
 
   async function signIn() {
-    if (!config || !clientId || !request) return;
+    if (!config) return;
     setState("loading");
     setError(null);
+
+    // Su Web / Desktop (Electron), signInWithPopup è il metodo più immediato e privo di intoppi
+    if (Platform.OS === "web") {
+      try {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        await signInWithPopup(authFor(config), provider);
+        setState("idle");
+        return;
+      } catch (err) {
+        // Se il popup viene bloccato dal browser o annullato dall'utente
+        const msg = String(err);
+        if (msg.includes("auth/popup-closed-by-user") || msg.includes("auth/cancelled-popup-request")) {
+          setState("idle");
+          return;
+        }
+        setError(formatAuthError(err));
+        setState("error");
+        return;
+      }
+    }
+
+    // Su Mobile (Android/iOS) tramite AuthSession
     try {
       const result = await promptAsync();
-      if (result.type === "success") {
+      if (result.type === "success" && result.params.id_token) {
         const idToken = result.params.id_token;
         await signInWithCredential(authFor(config), GoogleAuthProvider.credential(idToken));
         setState("idle");
@@ -53,10 +64,12 @@ export function useGoogleSignIn(config: FirebaseWebConfig | null, clientId: stri
         setState("idle");
       }
     } catch (err) {
-      setError(String(err));
+      setError(formatAuthError(err));
       setState("error");
     }
   }
 
-  return { available: !!clientId && !!request, state, error, signIn, response };
+  const isAvailable = Platform.OS === "web" || (!!request && !!effectiveClientId);
+
+  return { available: isAvailable, state, error, signIn, response };
 }

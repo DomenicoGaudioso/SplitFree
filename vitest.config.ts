@@ -5,7 +5,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+      "react-native": "react-native-web",
     },
+  },
+  define: {
+    __DEV__: "true",
   },
   test: {
     include: ["tests/**/*.test.ts"],

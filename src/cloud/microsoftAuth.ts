@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { Platform } from "react-native";
 import * as AuthSession from "expo-auth-session";
 import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
-import { OAuthProvider, signInWithCredential } from "firebase/auth";
-import { authFor } from "./auth";
+import { OAuthProvider, signInWithCredential, signInWithPopup } from "firebase/auth";
+import { authFor, formatAuthError } from "./auth";
+import { DEFAULT_MICROSOFT_CLIENT_ID } from "./defaultConfig";
 import type { FirebaseWebConfig } from "@/domain/types";
 import type { SignInState } from "./googleAuth";
 
@@ -16,17 +18,12 @@ const discovery = {
   tokenEndpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
 };
 
-/**
- * Accesso "Continua con Microsoft" per un progetto Firebase.
- * Richiede una App registration gratuita su Azure (Microsoft Entra ID →
- * App registrations, "Account personali Microsoft e account aziendali/
- * dell'istituzione"), collegata in Firebase come provider OIDC `microsoft.com`
- * con lo stesso Application (client) ID.
- */
 export function useMicrosoftSignIn(config: FirebaseWebConfig | null, clientId: string | null | undefined) {
   const [state, setState] = useState<SignInState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState<{ raw: string; hashed: string } | null>(null);
+
+  const effectiveClientId = clientId || DEFAULT_MICROSOFT_CLIENT_ID;
 
   useEffect(() => {
     let active = true;
@@ -42,7 +39,7 @@ export function useMicrosoftSignIn(config: FirebaseWebConfig | null, clientId: s
   const redirectUri = AuthSession.makeRedirectUri({ scheme: "splitfree" });
   const [request, , promptAsync] = AuthSession.useAuthRequest(
     {
-      clientId: clientId ?? "",
+      clientId: effectiveClientId,
       responseType: AuthSession.ResponseType.IdToken,
       scopes: ["openid", "profile", "email"],
       redirectUri,
@@ -53,9 +50,32 @@ export function useMicrosoftSignIn(config: FirebaseWebConfig | null, clientId: s
   );
 
   async function signIn() {
-    if (!config || !clientId || !request || !nonce) return;
+    if (!config) return;
     setState("loading");
     setError(null);
+
+    // Su Web / Desktop (Electron), signInWithPopup è diretto e non dipende da redirect URL
+    if (Platform.OS === "web") {
+      try {
+        const provider = new OAuthProvider("microsoft.com");
+        provider.setCustomParameters({ prompt: "select_account" });
+        await signInWithPopup(authFor(config), provider);
+        setState("idle");
+        return;
+      } catch (err) {
+        const msg = String(err);
+        if (msg.includes("auth/popup-closed-by-user") || msg.includes("auth/cancelled-popup-request")) {
+          setState("idle");
+          return;
+        }
+        setError(formatAuthError(err));
+        setState("error");
+        return;
+      }
+    }
+
+    // Su Mobile via AuthSession
+    if (!effectiveClientId || !request || !nonce) return;
     try {
       const result = await promptAsync();
       if (result.type === "success" && result.params.id_token) {
@@ -70,10 +90,12 @@ export function useMicrosoftSignIn(config: FirebaseWebConfig | null, clientId: s
         setState("idle");
       }
     } catch (err) {
-      setError(String(err));
+      setError(formatAuthError(err));
       setState("error");
     }
   }
 
-  return { available: !!clientId && !!request && !!nonce, state, error, signIn };
+  const isAvailable = Platform.OS === "web" || (!!effectiveClientId && !!request && !!nonce);
+
+  return { available: isAvailable, state, error, signIn };
 }

@@ -134,7 +134,7 @@ export default function JoinScreen() {
               ) : (
                 <>
                   <Text style={{ color: t.textMuted, fontSize: font.small, marginBottom: spacing.sm }}>
-                    Accedi con Google o Microsoft per entrare come {self?.name ?? "te"}.
+                    Scegli come accedere per unirti al gruppo (Google, Microsoft, Email o Ospite):
                   </Text>
                   <CloudSignInButtons config={payload.config} googleClientId={payload.googleClientId} microsoftClientId={payload.microsoftClientId} />
                 </>

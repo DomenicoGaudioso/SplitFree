@@ -8,6 +8,7 @@ import { CURRENCIES } from "@/domain/money";
 import type { Group } from "@/domain/types";
 import { PERSON_COLORS, useStore } from "@/store/store";
 import { Avatar, Button, Card, CloudSignInButtons, EmptyState, Screen, SectionHeader, SelectField, TextField } from "@/ui/components";
+import { getDefaultCloudProject } from "@/cloud/defaultConfig";
 import { font, radius, spacing, useTheme } from "@/ui/theme";
 
 const EMOJIS = ["👥", "🏖️", "🏠", "🍕", "✈️", "🚗", "🎉", "🏔️", "🛒", "🎂", "⛺", "🍻", "🎿", "💍", "🎓", "🐶", "⚽", "🎵"];
@@ -20,7 +21,10 @@ export default function ShareNewGroupScreen() {
   const upsertCloudGroupPointer = useStore((s) => s.upsertCloudGroupPointer);
   const defaultCurrency = useStore((s) => s.data.settings.defaultCurrency);
 
-  const [projectId, setProjectId] = useState<string | null>(projects[0]?.id ?? null);
+  const fallbackProject = getDefaultCloudProject();
+  const availableProjects = projects.length > 0 ? projects : [fallbackProject];
+
+  const [projectId, setProjectId] = useState<string | null>(availableProjects[0]?.id ?? fallbackProject.id);
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("👥");
   const [description, setDescription] = useState("");
@@ -28,25 +32,9 @@ export default function ShareNewGroupScreen() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const project = projects.find((p) => p.id === projectId) ?? null;
-  const authUser = useCloudAuthUser(project?.config ?? null);
+  const project = availableProjects.find((p) => p.id === projectId) ?? availableProjects[0] ?? fallbackProject;
+  const authUser = useCloudAuthUser(project.config);
 
-  if (projects.length === 0) {
-    return (
-      <Screen>
-        <Stack.Screen options={{ title: "Gruppo condiviso" }} />
-        <Card>
-          <EmptyState
-            icon="cloud-outline"
-            title="Collega prima un progetto"
-            message="Per creare un gruppo condiviso serve un progetto Firebase gratuito: si collega una volta sola dalle Impostazioni."
-            actionLabel="Vai a Impostazioni"
-            onAction={() => router.push("/settings")}
-          />
-        </Card>
-      </Screen>
-    );
-  }
 
   const create = async () => {
     if (!project || !authUser) return;

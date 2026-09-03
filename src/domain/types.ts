@@ -41,6 +41,8 @@ export type CloudProject = {
   id: string;
   label: string;
   config: FirebaseWebConfig;
+  /** Indica se è il progetto SplitFree Cloud predefinito. */
+  isDefault?: boolean;
   /** Web Client ID OAuth di Google Cloud, per l'accesso "Continua con Google". */
   googleClientId?: string;
   /** Application (client) ID di una registrazione app Azure, per "Continua con Microsoft". */
@@ -136,6 +138,20 @@ export type RateCacheEntry = {
   fetchedAt: string;
 };
 
+export type CloudStorageService = {
+  connected: boolean;
+  userEmail?: string | null;
+  userName?: string | null;
+  lastSync?: string | null;
+  accessToken?: string | null;
+  refreshToken?: string | null;
+};
+
+export type CloudStorageSettings = {
+  oneDrive?: CloudStorageService;
+  googleDrive?: CloudStorageService;
+};
+
 export type Settings = {
   ownerName: string;
   defaultCurrency: string;
@@ -144,6 +160,8 @@ export type Settings = {
   rates: Record<string, RateCacheEntry>;
   /** Progetti Firebase collegati da questo dispositivo come amministratore. */
   cloudProjects: CloudProject[];
+  /** Connessioni Cloud Storage per backup (Microsoft OneDrive, Google Drive). */
+  cloudStorage?: CloudStorageSettings;
 };
 
 export const DATA_VERSION = 1;

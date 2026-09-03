@@ -21,3 +21,4 @@ export * from "./AttachmentThumb";
 export * from "./Overlay";
 export * from "./CloudSignIn";
 export * from "./CloudProjectCard";
+export * from "./EmailAuthModal";
