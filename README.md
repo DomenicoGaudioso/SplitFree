@@ -21,6 +21,15 @@ App per dividere le spese in stile Splitwise: **gratuita, open source, senza pub
 - **Backup**: esportazione e importazione di un file JSON per spostare i dati fra dispositivi.
 - **Tema chiaro/scuro**, interfaccia in italiano.
 
+## Download
+
+Le versioni pronte sono nella pagina **[Releases](https://github.com/DomenicoGaudioso/SplitFree/releases)**:
+
+- `SplitFree-vX.Y.Z-android.apk`: da aprire sul telefono (Android chiede di consentire l'installazione da origini sconosciute, perché non passa dal Play Store);
+- `SplitFree-vX.Y.Z-macos.dmg`: per Mac con chip Apple (arm64) e Intel (x64); l'app non è firmata, quindi al primo avvio usare tasto destro → Apri.
+
+Ogni tag `v*` pubblicato sul repo fa partire la build e crea la release con i file allegati.
+
 ## Stack
 
 | Livello | Scelta |
@@ -66,7 +75,7 @@ Su Android si può provare subito con **Expo Go** (scansione del QR), oppure con
 
 ### Android (APK)
 
-Opzione A, senza toolchain locale: su GitHub, **Actions → Build → Run workflow**. Il job `android` produce `SplitFree-android-apk` (firmato con la chiave di debug, installabile direttamente). Lo stesso avviene automaticamente pubblicando un tag `v*`.
+Opzione A, senza toolchain locale: pubblicare un tag (`git tag v0.2.0 && git push origin v0.2.0`): GitHub Actions compila APK e app Mac e li allega a una release. Con **Actions → Build → Run workflow** si ottengono gli stessi file come artefatti, senza release.
 
 Opzione B, con Android Studio installato:
 

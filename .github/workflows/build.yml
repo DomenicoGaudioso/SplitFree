@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   test:
     name: Test e typecheck
@@ -68,3 +71,27 @@ jobs:
           path: |
             desktop/out/*.dmg
             desktop/out/*.zip
+
+  release:
+    name: Release su GitHub
+    runs-on: ubuntu-latest
+    needs: [android, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Rinomina i file con la versione
+        run: |
+          set -e
+          VER="${GITHUB_REF_NAME}"
+          mkdir -p out
+          cp artifacts/SplitFree-android-apk/*.apk "out/SplitFree-${VER}-android.apk"
+          for f in artifacts/SplitFree-macos/*.dmg; do cp "$f" "out/SplitFree-${VER}-macos.dmg"; done
+          for f in artifacts/SplitFree-macos/*.zip; do cp "$f" "out/SplitFree-${VER}-macos.zip"; done
+          ls -la out
+      - name: Pubblica la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" out/*             --repo "${GITHUB_REPOSITORY}"             --title "SplitFree ${GITHUB_REF_NAME}"             --notes "APK Android (firma debug, installabile abilitando le origini sconosciute) e app macOS (non firmata: primo avvio con tasto destro, Apri)."             || gh release upload "${GITHUB_REF_NAME}" out/* --repo "${GITHUB_REPOSITORY}" --clobber
