@@ -4,9 +4,11 @@ import { formatAuthError, signInAsGuest } from "@/cloud/auth";
 import { useGoogleSignIn } from "@/cloud/googleAuth";
 import { useMicrosoftSignIn } from "@/cloud/microsoftAuth";
 import type { FirebaseWebConfig } from "@/domain/types";
+import { useStore } from "@/store/store";
 import { font, spacing, useTheme } from "../theme";
 import { Button } from "./Button";
 import { EmailAuthModal } from "./EmailAuthModal";
+import { SocialAuthModal } from "./SocialAuthModal";
 
 type Props = {
   config: FirebaseWebConfig | null;
@@ -25,23 +27,22 @@ export function CloudSignInButtons({
   compact = false,
 }: Props) {
   const t = useTheme();
+  const settings = useStore((s) => s.data.settings);
   const google = useGoogleSignIn(config, googleClientId);
   const microsoft = useMicrosoftSignIn(config, microsoftClientId);
+
+  const [googleModalVisible, setGoogleModalVisible] = useState(false);
+  const [microsoftModalVisible, setMicrosoftModalVisible] = useState(false);
   const [emailModalVisible, setEmailModalVisible] = useState(false);
   const [guestLoading, setGuestLoading] = useState(false);
   const [guestError, setGuestError] = useState<string | null>(null);
-
-  const handle = async (fn: () => Promise<void>) => {
-    await fn();
-    onSignedIn?.();
-  };
 
   const handleGuestSignIn = async () => {
     if (!config) return;
     setGuestLoading(true);
     setGuestError(null);
     try {
-      await signInAsGuest(config);
+      await signInAsGuest(config, settings.ownerName || "Ospite");
       onSignedIn?.();
     } catch (err) {
       setGuestError(formatAuthError(err));
@@ -61,25 +62,23 @@ export function CloudSignInButtons({
   return (
     <View style={styles.container}>
       <View style={[styles.buttonsRow, compact && styles.compactRow]}>
-        {/* Continua con Google */}
+        {/* Accedi con Google */}
         <Button
           title="Google"
           icon="logo-google"
           variant="secondary"
           size={compact ? "sm" : "md"}
-          onPress={() => void handle(google.signIn)}
-          loading={google.state === "loading"}
+          onPress={() => setGoogleModalVisible(true)}
           style={compact ? styles.compactBtn : styles.btn}
         />
 
-        {/* Continua con Microsoft */}
+        {/* Accedi con Microsoft */}
         <Button
           title="Microsoft"
           icon="logo-microsoft"
           variant="secondary"
           size={compact ? "sm" : "md"}
-          onPress={() => void handle(microsoft.signIn)}
-          loading={microsoft.state === "loading"}
+          onPress={() => setMicrosoftModalVisible(true)}
           style={compact ? styles.compactBtn : styles.btn}
         />
 
@@ -115,6 +114,32 @@ export function CloudSignInButtons({
       {guestError ? (
         <Text style={[styles.errorText, { color: t.negative }]}>{guestError}</Text>
       ) : null}
+
+      {/* Modal Google */}
+      <SocialAuthModal
+        visible={googleModalVisible}
+        provider="google"
+        config={config}
+        initialEmail={settings.cloudStorage?.googleDrive?.userEmail || ""}
+        initialName={settings.ownerName || ""}
+        onClose={() => setGoogleModalVisible(false)}
+        onSuccess={() => onSignedIn?.()}
+        onTrySso={google.signIn}
+        ssoLoading={google.state === "loading"}
+      />
+
+      {/* Modal Microsoft */}
+      <SocialAuthModal
+        visible={microsoftModalVisible}
+        provider="microsoft"
+        config={config}
+        initialEmail={settings.cloudStorage?.oneDrive?.userEmail || ""}
+        initialName={settings.ownerName || ""}
+        onClose={() => setMicrosoftModalVisible(false)}
+        onSuccess={() => onSignedIn?.()}
+        onTrySso={microsoft.signIn}
+        ssoLoading={microsoft.state === "loading"}
+      />
 
       {/* Modal Email */}
       <EmailAuthModal

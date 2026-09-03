@@ -32,6 +32,11 @@ export type OneDriveAccount = {
  */
 export async function authenticateOneDrive(clientId?: string): Promise<OneDriveAccount> {
   const effectiveClientId = clientId || DEFAULT_MICROSOFT_CLIENT_ID;
+  if (!clientId && effectiveClientId === DEFAULT_MICROSOFT_CLIENT_ID) {
+    throw new Error(
+      "Nessun Client ID personale configurato per Microsoft Azure. Inserisci il tuo Application ID nelle opzioni avanzate oppure usa la connessione rapida con la tua email."
+    );
+  }
   const redirectUri = AuthSession.makeRedirectUri({ scheme: "splitfree" });
 
   const request = new AuthSession.AuthRequest({

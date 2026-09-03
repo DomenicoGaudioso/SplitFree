@@ -30,6 +30,11 @@ export type GoogleDriveAccount = {
  */
 export async function authenticateGoogleDrive(clientId?: string): Promise<GoogleDriveAccount> {
   const effectiveClientId = clientId || DEFAULT_GOOGLE_CLIENT_ID;
+  if (!clientId && effectiveClientId === DEFAULT_GOOGLE_CLIENT_ID) {
+    throw new Error(
+      "Nessun Client ID personale configurato per Google Cloud. Inserisci il tuo Web Client ID nelle opzioni avanzate oppure usa la connessione rapida con la tua email."
+    );
+  }
   const redirectUri = AuthSession.makeRedirectUri({ scheme: "splitfree" });
 
   const request = new AuthSession.AuthRequest({

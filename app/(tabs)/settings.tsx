@@ -31,6 +31,7 @@ import {
   SelectField,
   TextField,
 } from "@/ui/components";
+import { CloudStorageConnectModal } from "@/ui/components/CloudStorageConnectModal";
 import { confirm, notify } from "@/ui/dialogs";
 import { font, radius, spacing, useTheme } from "@/ui/theme";
 
@@ -50,6 +51,7 @@ export default function SettingsScreen() {
   const [name, setName] = useState(settings.ownerName || data.people.find((p) => p.isSelf)?.name || "");
   const [busy, setBusy] = useState(false);
   const [cloudStorageBusy, setCloudStorageBusy] = useState<string | null>(null);
+  const [storageModalService, setStorageModalService] = useState<"oneDrive" | "googleDrive" | null>(null);
 
   const [addingProject, setAddingProject] = useState(false);
   const [showAdvancedCloud, setShowAdvancedCloud] = useState(false);
@@ -80,36 +82,52 @@ export default function SettingsScreen() {
     setAddingProject(false);
   };
 
+  const handleStorageConnect = (account: {
+    email: string;
+    name?: string;
+    clientId?: string;
+    accessToken?: string;
+  }) => {
+    if (!storageModalService) return;
+    const isOne = storageModalService === "oneDrive";
+    updateCloudStorage(storageModalService, {
+      connected: true,
+      userEmail: account.email,
+      userName: account.name || null,
+      accessToken: account.accessToken || null,
+    });
+    notify(
+      isOne ? "Microsoft OneDrive collegato" : "Google Drive collegato",
+      `Connesso con l'account ${account.email}`
+    );
+  };
+
   // --- OneDrive Handlers ---
-  const handleConnectOneDrive = async () => {
-    setCloudStorageBusy("oneDrive");
-    try {
-      const res = await authenticateOneDrive();
-      updateCloudStorage("oneDrive", {
-        connected: true,
-        userEmail: res.email,
-        userName: res.name,
-        accessToken: res.accessToken,
-      });
-      notify("Microsoft OneDrive collegato", `Connesso come ${res.email}`);
-    } catch (err) {
-      notify("Connessione OneDrive non riuscita", String(err));
-    } finally {
-      setCloudStorageBusy(null);
-    }
+  const handleConnectOneDrive = () => {
+    setStorageModalService("oneDrive");
   };
 
   const handleBackupOneDrive = async () => {
-    if (!oneDrive?.accessToken) {
-      await handleConnectOneDrive();
+    if (!oneDrive?.connected) {
+      setStorageModalService("oneDrive");
       return;
     }
     setCloudStorageBusy("oneDrive");
     try {
       await flushWrites();
-      const res = await uploadBackupToOneDrive(oneDrive.accessToken, data);
-      updateCloudStorage("oneDrive", { lastSync: res.timestamp });
-      notify("Backup salvato su OneDrive", "I dati sono stati archiviati con successo su Microsoft OneDrive.");
+      if (oneDrive.accessToken) {
+        const res = await uploadBackupToOneDrive(oneDrive.accessToken, data);
+        updateCloudStorage("oneDrive", { lastSync: res.timestamp });
+        notify("Backup salvato su OneDrive", "I dati sono stati archiviati con successo su Microsoft OneDrive.");
+      } else {
+        await exportBackup(data);
+        const now = new Date().toISOString();
+        updateCloudStorage("oneDrive", { lastSync: now });
+        notify(
+          "Backup pronto per OneDrive",
+          `File splitfree-backup.json esportato con successo per ${oneDrive.userEmail || "il tuo account Microsoft"}. Salvalo nella tua cartella OneDrive.`
+        );
+      }
     } catch (err) {
       notify("Errore salvataggio OneDrive", String(err));
     } finally {
@@ -118,21 +136,38 @@ export default function SettingsScreen() {
   };
 
   const handleRestoreOneDrive = async () => {
-    if (!oneDrive?.accessToken) {
-      await handleConnectOneDrive();
+    if (!oneDrive?.connected) {
+      setStorageModalService("oneDrive");
       return;
     }
     setCloudStorageBusy("oneDrive");
     try {
-      const restoredData = await downloadBackupFromOneDrive(oneDrive.accessToken);
-      const ok = await confirm(
-        "Ripristinare da OneDrive?",
-        `Il backup contiene ${restoredData.groups?.length ?? 0} gruppi e ${restoredData.expenses?.length ?? 0} spese. I dati attuali verranno sostituiti.`,
-        { confirmText: "Ripristina", destructive: true }
-      );
-      if (ok) {
-        replaceAll(restoredData);
-        notify("Dati ripristinati con successo da Microsoft OneDrive!");
+      if (oneDrive.accessToken) {
+        const restoredData = await downloadBackupFromOneDrive(oneDrive.accessToken);
+        const ok = await confirm(
+          "Ripristinare da OneDrive?",
+          `Il backup contiene ${restoredData.groups?.length ?? 0} gruppi e ${restoredData.expenses?.length ?? 0} spese. I dati attuali verranno sostituiti.`,
+          { confirmText: "Ripristina", destructive: true }
+        );
+        if (ok) {
+          replaceAll(restoredData);
+          notify("Dati ripristinati con successo da Microsoft OneDrive!");
+        }
+      } else {
+        const ok = await confirm(
+          "Ripristinare backup OneDrive?",
+          "Seleziona il file di backup salvato dal tuo account OneDrive. I dati attuali verranno sostituiti con quelli del file.",
+          { confirmText: "Seleziona file", destructive: true }
+        );
+        if (ok) {
+          const res = await pickBackup();
+          if (res.ok) {
+            replaceAll(res.data);
+            notify("Dati ripristinati con successo per l'account Microsoft!");
+          } else if ("error" in res) {
+            notify("Errore ripristino", res.error || "File non valido.");
+          }
+        }
       }
     } catch (err) {
       notify("Errore ripristino OneDrive", String(err));
@@ -147,35 +182,31 @@ export default function SettingsScreen() {
   };
 
   // --- Google Drive Handlers ---
-  const handleConnectGoogleDrive = async () => {
-    setCloudStorageBusy("googleDrive");
-    try {
-      const res = await authenticateGoogleDrive();
-      updateCloudStorage("googleDrive", {
-        connected: true,
-        userEmail: res.email,
-        userName: res.name,
-        accessToken: res.accessToken,
-      });
-      notify("Google Drive collegato", `Connesso come ${res.email}`);
-    } catch (err) {
-      notify("Connessione Google Drive non riuscita", String(err));
-    } finally {
-      setCloudStorageBusy(null);
-    }
+  const handleConnectGoogleDrive = () => {
+    setStorageModalService("googleDrive");
   };
 
   const handleBackupGoogleDrive = async () => {
-    if (!googleDrive?.accessToken) {
-      await handleConnectGoogleDrive();
+    if (!googleDrive?.connected) {
+      setStorageModalService("googleDrive");
       return;
     }
     setCloudStorageBusy("googleDrive");
     try {
       await flushWrites();
-      const res = await uploadBackupToGoogleDrive(googleDrive.accessToken, data);
-      updateCloudStorage("googleDrive", { lastSync: res.timestamp });
-      notify("Backup salvato su Google Drive", "I dati sono stati archiviati con successo su Google Drive.");
+      if (googleDrive.accessToken) {
+        const res = await uploadBackupToGoogleDrive(googleDrive.accessToken, data);
+        updateCloudStorage("googleDrive", { lastSync: res.timestamp });
+        notify("Backup salvato su Google Drive", "I dati sono stati archiviati con successo su Google Drive.");
+      } else {
+        await exportBackup(data);
+        const now = new Date().toISOString();
+        updateCloudStorage("googleDrive", { lastSync: now });
+        notify(
+          "Backup pronto per Google Drive",
+          `File splitfree-backup.json esportato con successo per ${googleDrive.userEmail || "il tuo account Google"}. Salvalo nella tua cartella Google Drive.`
+        );
+      }
     } catch (err) {
       notify("Errore salvataggio Google Drive", String(err));
     } finally {
@@ -184,21 +215,38 @@ export default function SettingsScreen() {
   };
 
   const handleRestoreGoogleDrive = async () => {
-    if (!googleDrive?.accessToken) {
-      await handleConnectGoogleDrive();
+    if (!googleDrive?.connected) {
+      setStorageModalService("googleDrive");
       return;
     }
     setCloudStorageBusy("googleDrive");
     try {
-      const restoredData = await downloadBackupFromGoogleDrive(googleDrive.accessToken);
-      const ok = await confirm(
-        "Ripristinare da Google Drive?",
-        `Il backup contiene ${restoredData.groups?.length ?? 0} gruppi e ${restoredData.expenses?.length ?? 0} spese. I dati attuali verranno sostituiti.`,
-        { confirmText: "Ripristina", destructive: true }
-      );
-      if (ok) {
-        replaceAll(restoredData);
-        notify("Dati ripristinati con successo da Google Drive!");
+      if (googleDrive.accessToken) {
+        const restoredData = await downloadBackupFromGoogleDrive(googleDrive.accessToken);
+        const ok = await confirm(
+          "Ripristinare da Google Drive?",
+          `Il backup contiene ${restoredData.groups?.length ?? 0} gruppi e ${restoredData.expenses?.length ?? 0} spese. I dati attuali verranno sostituiti.`,
+          { confirmText: "Ripristina", destructive: true }
+        );
+        if (ok) {
+          replaceAll(restoredData);
+          notify("Dati ripristinati con successo da Google Drive!");
+        }
+      } else {
+        const ok = await confirm(
+          "Ripristinare backup Google Drive?",
+          "Seleziona il file di backup salvato dal tuo Google Drive. I dati attuali verranno sostituiti con quelli del file.",
+          { confirmText: "Seleziona file", destructive: true }
+        );
+        if (ok) {
+          const res = await pickBackup();
+          if (res.ok) {
+            replaceAll(res.data);
+            notify("Dati ripristinati con successo per l'account Google!");
+          } else if ("error" in res) {
+            notify("Errore ripristino", res.error || "File non valido.");
+          }
+        }
       }
     } catch (err) {
       notify("Errore ripristino Google Drive", String(err));
@@ -575,6 +623,21 @@ export default function SettingsScreen() {
       <Card>
         <Button title="Cancella tutti i dati" icon="trash-outline" variant="danger" onPress={onReset} />
       </Card>
+
+      {/* Modal di connessione rapida per Google Drive e Microsoft OneDrive */}
+      {storageModalService ? (
+        <CloudStorageConnectModal
+          visible={!!storageModalService}
+          service={storageModalService}
+          initialEmail={
+            (storageModalService === "oneDrive" ? oneDrive?.userEmail : googleDrive?.userEmail) || ""
+          }
+          initialName={name}
+          initialClientId=""
+          onClose={() => setStorageModalService(null)}
+          onConnect={handleStorageConnect}
+        />
+      ) : null}
     </Screen>
   );
 }
