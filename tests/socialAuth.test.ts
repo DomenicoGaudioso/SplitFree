@@ -7,6 +7,11 @@ import {
   signInWithMicrosoftAccount,
   signOutOfProject,
 } from "@/cloud/auth";
+import {
+  DEFAULT_GOOGLE_CLIENT_ID,
+  DEFAULT_MICROSOFT_CLIENT_ID,
+  isPlaceholderClientId,
+} from "@/cloud/defaultConfig";
 import type { FirebaseWebConfig } from "@/domain/types";
 
 // Mock AsyncStorage in-memory
@@ -115,4 +120,15 @@ describe("Social & 1-Click Authentication (Google & Microsoft)", () => {
     expect(formatAuthError(new Error("AADSTS700016"))).toContain("Client ID");
     expect(formatAuthError({ code: "auth/unauthorized-domain" })).toBeDefined();
   });
+
+  it("correctly identifies placeholder client IDs to prevent 401 invalid_client and AADSTS700016", () => {
+    expect(isPlaceholderClientId(null)).toBe(true);
+    expect(isPlaceholderClientId("")).toBe(true);
+    expect(isPlaceholderClientId(DEFAULT_GOOGLE_CLIENT_ID)).toBe(true);
+    expect(isPlaceholderClientId(DEFAULT_MICROSOFT_CLIENT_ID)).toBe(true);
+    expect(isPlaceholderClientId("00000000-0000-0000-0000-000000000000")).toBe(true);
+    expect(isPlaceholderClientId("custom-app-12345.apps.googleusercontent.com")).toBe(false);
+    expect(isPlaceholderClientId("3f7b2c1a-4d5e-6f7a-8b9c-0d1e2f3a4b5c")).toBe(false);
+  });
 });
+

@@ -12,6 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { authenticateGoogleDrive } from "@/cloud/googleDriveSync";
 import { authenticateOneDrive } from "@/cloud/oneDriveSync";
+import { isPlaceholderClientId } from "@/cloud/defaultConfig";
 import { font, radius, spacing, useTheme } from "../theme";
 import { Button } from "./Button";
 import { TextField } from "./TextField";
@@ -19,9 +20,9 @@ import { TextField } from "./TextField";
 type Props = {
   visible: boolean;
   service: "oneDrive" | "googleDrive";
-  initialEmail?: string;
-  initialName?: string;
-  initialClientId?: string;
+  initialEmail?: string | null;
+  initialName?: string | null;
+  initialClientId?: string | null;
   onClose: () => void;
   onConnect: (account: {
     email: string;
@@ -34,31 +35,31 @@ type Props = {
 export function CloudStorageConnectModal({
   visible,
   service,
-  initialEmail = "",
-  initialName = "",
-  initialClientId = "",
+  initialEmail,
+  initialName,
+  initialClientId,
   onClose,
   onConnect,
 }: Props) {
   const t = useTheme();
-  const [email, setEmail] = useState(initialEmail);
-  const [name, setName] = useState(initialName);
-  const [clientId, setClientId] = useState(initialClientId);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [loadingOAuth, setLoadingOAuth] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const isGoogle = service === "googleDrive";
   const brandTitle = isGoogle ? "Google Drive" : "Microsoft OneDrive";
   const brandIcon = isGoogle ? "logo-google" : "logo-microsoft";
   const brandColor = isGoogle ? "#EA4335" : "#00A4EF";
   const defaultPlaceholder = isGoogle ? "tuonome@gmail.com" : "tuonome@outlook.com";
 
+  const [email, setEmail] = useState(initialEmail || "");
+  const [name, setName] = useState(initialName || "");
+  const [clientId, setClientId] = useState(initialClientId || "");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [loadingOAuth, setLoadingOAuth] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     if (visible) {
-      if (initialEmail && !email) setEmail(initialEmail);
-      if (initialName && !name) setName(initialName);
-      if (initialClientId && !clientId) setClientId(initialClientId);
+      setEmail(initialEmail || "");
+      setName(initialName || "");
+      setClientId(initialClientId || "");
       setError(null);
       setLoadingOAuth(false);
     }
@@ -92,23 +93,33 @@ export function CloudStorageConnectModal({
 
   async function handleOAuthConnect() {
     setError(null);
+    const cleanClientId = clientId.trim();
+    if (!cleanClientId || isPlaceholderClientId(cleanClientId)) {
+      setError(
+        isGoogle
+          ? "Per la connessione OAuth interattiva inserisci un Web Client ID registrato in Google Cloud Console. Altrimenti usa la comoda connessione rapida sopra!"
+          : "Per la connessione OAuth interattiva inserisci un Application ID registrato in Microsoft Azure. Altrimenti usa la comoda connessione rapida sopra!"
+      );
+      return;
+    }
+
     setLoadingOAuth(true);
     try {
       if (isGoogle) {
-        const res = await authenticateGoogleDrive(clientId.trim() || undefined);
+        const res = await authenticateGoogleDrive(cleanClientId);
         onConnect({
           email: res.email,
           name: res.name,
           accessToken: res.accessToken,
-          clientId: clientId.trim() || undefined,
+          clientId: cleanClientId,
         });
       } else {
-        const res = await authenticateOneDrive(clientId.trim() || undefined);
+        const res = await authenticateOneDrive(cleanClientId);
         onConnect({
           email: res.email,
           name: res.name,
           accessToken: res.accessToken,
-          clientId: clientId.trim() || undefined,
+          clientId: cleanClientId,
         });
       }
       handleClose();

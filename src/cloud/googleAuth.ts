@@ -4,7 +4,7 @@ import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
 import { GoogleAuthProvider, signInWithCredential, signInWithPopup } from "firebase/auth";
 import { authFor, formatAuthError } from "./auth";
-import { DEFAULT_GOOGLE_CLIENT_ID } from "./defaultConfig";
+import { DEFAULT_GOOGLE_CLIENT_ID, isPlaceholderClientId } from "./defaultConfig";
 import type { FirebaseWebConfig } from "@/domain/types";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -28,6 +28,14 @@ export function useGoogleSignIn(config: FirebaseWebConfig | null, clientId: stri
     if (!config) return;
     setState("loading");
     setError(null);
+
+    if (isPlaceholderClientId(effectiveClientId)) {
+      setError(
+        "Nessun Web Client ID registrato su Google Cloud. Usa l'accesso rapido con email Google per entrare subito senza configurazioni."
+      );
+      setState("error");
+      return;
+    }
 
     // Su Web / Desktop (Electron), signInWithPopup è il metodo più immediato e privo di intoppi
     if (Platform.OS === "web") {
@@ -69,7 +77,7 @@ export function useGoogleSignIn(config: FirebaseWebConfig | null, clientId: stri
     }
   }
 
-  const isAvailable = Platform.OS === "web" || (!!request && !!effectiveClientId);
+  const isAvailable = !isPlaceholderClientId(effectiveClientId);
 
   return { available: isAvailable, state, error, signIn, response };
 }

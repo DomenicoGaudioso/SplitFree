@@ -1,6 +1,6 @@
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
-import { DEFAULT_GOOGLE_CLIENT_ID } from "./defaultConfig";
+import { DEFAULT_GOOGLE_CLIENT_ID, isPlaceholderClientId } from "./defaultConfig";
 import type { AppData } from "@/domain/types";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -15,6 +15,7 @@ const GOOGLE_DRIVE_SCOPES = [
   "profile",
   "email",
   "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive.appdata",
 ];
 
 const BACKUP_FILE_NAME = "splitfree_backup.json";
@@ -30,9 +31,9 @@ export type GoogleDriveAccount = {
  */
 export async function authenticateGoogleDrive(clientId?: string): Promise<GoogleDriveAccount> {
   const effectiveClientId = clientId || DEFAULT_GOOGLE_CLIENT_ID;
-  if (!clientId && effectiveClientId === DEFAULT_GOOGLE_CLIENT_ID) {
+  if (!clientId || isPlaceholderClientId(effectiveClientId)) {
     throw new Error(
-      "Nessun Client ID personale configurato per Google Cloud. Inserisci il tuo Web Client ID nelle opzioni avanzate oppure usa la connessione rapida con la tua email."
+      "Nessun Client ID valido configurato per Google Cloud Console. Inserisci il tuo Web Client ID personale oppure usa la connessione rapida con la tua email."
     );
   }
   const redirectUri = AuthSession.makeRedirectUri({ scheme: "splitfree" });

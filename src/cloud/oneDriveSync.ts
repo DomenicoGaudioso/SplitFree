@@ -1,6 +1,6 @@
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
-import { DEFAULT_MICROSOFT_CLIENT_ID } from "./defaultConfig";
+import { DEFAULT_MICROSOFT_CLIENT_ID, isPlaceholderClientId } from "./defaultConfig";
 import type { AppData } from "@/domain/types";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -32,9 +32,9 @@ export type OneDriveAccount = {
  */
 export async function authenticateOneDrive(clientId?: string): Promise<OneDriveAccount> {
   const effectiveClientId = clientId || DEFAULT_MICROSOFT_CLIENT_ID;
-  if (!clientId && effectiveClientId === DEFAULT_MICROSOFT_CLIENT_ID) {
+  if (!clientId || isPlaceholderClientId(effectiveClientId)) {
     throw new Error(
-      "Nessun Client ID personale configurato per Microsoft Azure. Inserisci il tuo Application ID nelle opzioni avanzate oppure usa la connessione rapida con la tua email."
+      "Nessun Application (Client) ID valido registrato su Microsoft Azure. Inserisci il tuo Application ID personale oppure usa la connessione rapida con la tua email."
     );
   }
   const redirectUri = AuthSession.makeRedirectUri({ scheme: "splitfree" });

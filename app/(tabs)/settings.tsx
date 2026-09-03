@@ -5,12 +5,10 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { parseFirebaseConfigSnippet } from "@/cloud/configParse";
 import {
-  authenticateGoogleDrive,
   downloadBackupFromGoogleDrive,
   uploadBackupToGoogleDrive,
 } from "@/cloud/googleDriveSync";
 import {
-  authenticateOneDrive,
   downloadBackupFromOneDrive,
   uploadBackupToOneDrive,
 } from "@/cloud/oneDriveSync";

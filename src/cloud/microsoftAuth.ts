@@ -5,7 +5,7 @@ import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
 import { OAuthProvider, signInWithCredential, signInWithPopup } from "firebase/auth";
 import { authFor, formatAuthError } from "./auth";
-import { DEFAULT_MICROSOFT_CLIENT_ID } from "./defaultConfig";
+import { DEFAULT_MICROSOFT_CLIENT_ID, isPlaceholderClientId } from "./defaultConfig";
 import type { FirebaseWebConfig } from "@/domain/types";
 import type { SignInState } from "./googleAuth";
 
@@ -54,6 +54,14 @@ export function useMicrosoftSignIn(config: FirebaseWebConfig | null, clientId: s
     setState("loading");
     setError(null);
 
+    if (isPlaceholderClientId(effectiveClientId)) {
+      setError(
+        "Nessun Application (Client) ID registrato su Microsoft Azure. Usa l'accesso rapido con email Microsoft per entrare subito senza configurazioni."
+      );
+      setState("error");
+      return;
+    }
+
     // Su Web / Desktop (Electron), signInWithPopup è diretto e non dipende da redirect URL
     if (Platform.OS === "web") {
       try {
@@ -95,7 +103,7 @@ export function useMicrosoftSignIn(config: FirebaseWebConfig | null, clientId: s
     }
   }
 
-  const isAvailable = Platform.OS === "web" || (!!effectiveClientId && !!request && !!nonce);
+  const isAvailable = !isPlaceholderClientId(effectiveClientId);
 
   return { available: isAvailable, state, error, signIn };
 }

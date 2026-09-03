@@ -124,7 +124,7 @@ export function CloudSignInButtons({
         initialName={settings.ownerName || ""}
         onClose={() => setGoogleModalVisible(false)}
         onSuccess={() => onSignedIn?.()}
-        onTrySso={google.signIn}
+        onTrySso={google.available ? google.signIn : undefined}
         ssoLoading={google.state === "loading"}
       />
 
@@ -137,7 +137,7 @@ export function CloudSignInButtons({
         initialName={settings.ownerName || ""}
         onClose={() => setMicrosoftModalVisible(false)}
         onSuccess={() => onSignedIn?.()}
-        onTrySso={microsoft.signIn}
+        onTrySso={microsoft.available ? microsoft.signIn : undefined}
         ssoLoading={microsoft.state === "loading"}
       />
 

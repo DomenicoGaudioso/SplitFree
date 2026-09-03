@@ -47,3 +47,21 @@ export function isDefaultCloudProject(project?: { id?: string; isDefault?: boole
   if (!project) return false;
   return project.isDefault === true || project.id === DEFAULT_CLOUD_PROJECT_ID;
 }
+
+/**
+ * Riconosce se un Client ID OAuth è un valore segnaposto non registrato su Azure o Google Cloud,
+ * prevenendo chiamate a vuoto che generano errori '401 invalid_client' o 'AADSTS700016'.
+ */
+export function isPlaceholderClientId(id?: string | null): boolean {
+  if (!id) return true;
+  const clean = id.trim();
+  return (
+    clean === "" ||
+    clean === DEFAULT_GOOGLE_CLIENT_ID ||
+    clean === DEFAULT_MICROSOFT_CLIENT_ID ||
+    clean.includes("splitfree.apps.googleusercontent.com") ||
+    clean.includes("00000000-0000") ||
+    clean === "89c1df9e-9762-42bb-92e1-4c6e91da2605"
+  );
+}
+
