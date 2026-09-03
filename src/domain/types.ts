@@ -9,6 +9,8 @@ export type SplitMethod = "equal" | "percentage" | "shares" | "exact";
 export type Person = {
   id: string;
   name: string;
+  /** Facoltativa solo per record creati prima che diventasse obbligatoria; il form la richiede sempre per le persone nuove. */
+  email: string | null;
   color: string;
   isSelf: boolean;
   archivedAt: string | null;

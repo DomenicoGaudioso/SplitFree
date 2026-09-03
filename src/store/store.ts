@@ -14,6 +14,7 @@ import type {
   SplitMethod,
 } from "@/domain/types";
 import { DEFAULT_CATEGORY_ID } from "@/domain/categories";
+import { normalizeEmail } from "@/domain/validate";
 import { deleteExpenseAttachmentFiles } from "./attachments";
 import { nowIso, uuid } from "./ids";
 import { emptyData, loadData, saveData } from "./persistence";
@@ -51,8 +52,8 @@ type Store = {
   hydrated: boolean;
   hydrate: () => Promise<void>;
 
-  addPerson: (input: { name: string; color?: string; isSelf?: boolean }) => Person;
-  updatePerson: (id: string, patch: Partial<Pick<Person, "name" | "color">>) => void;
+  addPerson: (input: { name: string; email: string | null; color?: string; isSelf?: boolean }) => Person;
+  updatePerson: (id: string, patch: Partial<Pick<Person, "name" | "email" | "color">>) => void;
   archivePerson: (id: string, archived: boolean) => void;
   deletePerson: (id: string) => { ok: boolean; reason?: string };
 
@@ -101,6 +102,7 @@ function ensureSelf(data: AppData): AppData {
   const self: Person = {
     id: uuid(),
     name: data.settings.ownerName || "Io",
+    email: null,
     color: PERSON_COLORS[0],
     isSelf: true,
     archivedAt: null,
@@ -128,12 +130,13 @@ export const useStore = create<Store>((set, get) => {
       schedulePersist(loaded);
     },
 
-    addPerson: ({ name, color, isSelf = false }) => {
+    addPerson: ({ name, email, color, isSelf = false }) => {
       const ts = nowIso();
       const used = get().data.people.length;
       const person: Person = {
         id: uuid(),
         name: name.trim(),
+        email: email ? normalizeEmail(email) : null,
         color: color ?? PERSON_COLORS[used % PERSON_COLORS.length],
         isSelf,
         archivedAt: null,

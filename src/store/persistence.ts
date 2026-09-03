@@ -40,7 +40,7 @@ export function migrate(raw: unknown): AppData {
   const r = raw as Partial<AppData>;
   return {
     version: DATA_VERSION,
-    people: Array.isArray(r.people) ? r.people : [],
+    people: Array.isArray(r.people) ? r.people.map((p) => ({ ...p, email: p.email ?? null })) : [],
     groups: Array.isArray(r.groups)
       ? r.groups.map((g) => ({
           ...g,

@@ -23,12 +23,14 @@ export default function PeopleScreen() {
 
   const row = (p: (typeof people)[number], last: boolean) => {
     const n = groupCount.get(p.id) ?? 0;
+    const groupsLabel = p.isSelf ? "Sei tu" : n === 0 ? "In nessun gruppo" : `In ${n} ${n === 1 ? "gruppo" : "gruppi"}`;
+    const subtitle = p.email ? `${p.email} · ${groupsLabel}` : groupsLabel;
     return (
       <ListRow
         key={p.id}
         leading={<Avatar person={p} size={42} />}
         title={p.name}
-        subtitle={p.isSelf ? "Sei tu" : n === 0 ? "In nessun gruppo" : `In ${n} ${n === 1 ? "gruppo" : "gruppi"}`}
+        subtitle={subtitle}
         trailing={p.isSelf ? <Tag label="tu" color={t.primary} /> : undefined}
         chevron
         onPress={() => router.push({ pathname: "/person/edit", params: { id: p.id } })}

@@ -3,6 +3,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { CURRENCIES } from "@/domain/money";
+import { isValidEmail, normalizeEmail } from "@/domain/validate";
 import { useStore } from "@/store/store";
 import { useGroup, usePeople, useSelf } from "@/store/selectors";
 import { Avatar, Button, Card, Screen, SectionHeader, SelectField, TextField } from "@/ui/components";
@@ -28,6 +29,8 @@ export default function GroupEditScreen() {
   const [currency, setCurrency] = useState(existing?.currency ?? defaultCurrency);
   const [memberIds, setMemberIds] = useState<string[]>(existing?.memberIds ?? (self ? [self.id] : []));
   const [newPerson, setNewPerson] = useState("");
+  const [newPersonEmail, setNewPersonEmail] = useState("");
+  const [newPersonError, setNewPersonError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const candidates = useMemo(() => people.filter((p) => !p.archivedAt || memberIds.includes(p.id)), [people, memberIds]);
@@ -39,9 +42,19 @@ export default function GroupEditScreen() {
   const quickAdd = () => {
     const n = newPerson.trim();
     if (!n) return;
-    const p = addPerson({ name: n });
+    if (!newPersonEmail.trim()) {
+      setNewPersonError("Serve un'email per la nuova persona.");
+      return;
+    }
+    if (!isValidEmail(newPersonEmail)) {
+      setNewPersonError("Questa email non sembra valida.");
+      return;
+    }
+    const p = addPerson({ name: n, email: normalizeEmail(newPersonEmail) });
     setMemberIds((ids) => [...ids, p.id]);
     setNewPerson("");
+    setNewPersonEmail("");
+    setNewPersonError(null);
   };
 
   const save = () => {
@@ -111,11 +124,45 @@ export default function GroupEditScreen() {
             );
           })}
         </View>
-        <View style={{ flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, marginTop: spacing.sm }}>
-          <View style={{ flex: 1 }}>
-            <TextField label="Aggiungi persona" value={newPerson} onChangeText={setNewPerson} placeholder="Nome" onSubmitEditing={quickAdd} returnKeyType="done" containerStyle={{ marginBottom: 0 }} />
+        <View style={{ marginTop: spacing.sm }}>
+          <Text style={{ color: t.textMuted, fontSize: font.small, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6 }}>
+            Aggiungi persona
+          </Text>
+          <View style={{ flexDirection: "row", gap: spacing.sm }}>
+            <View style={{ flex: 1 }}>
+              <TextField
+                value={newPerson}
+                onChangeText={setNewPerson}
+                placeholder="Nome"
+                returnKeyType="next"
+                containerStyle={{ marginBottom: 0 }}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <TextField
+                value={newPersonEmail}
+                onChangeText={(v) => {
+                  setNewPersonEmail(v);
+                  setNewPersonError(null);
+                }}
+                placeholder="Email"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                onSubmitEditing={quickAdd}
+                returnKeyType="done"
+                containerStyle={{ marginBottom: 0 }}
+              />
+            </View>
           </View>
-          <Button title="Aggiungi" icon="person-add" variant="secondary" onPress={quickAdd} disabled={!newPerson.trim()} />
+          {newPersonError ? <Text style={{ color: t.negative, fontSize: font.small, marginTop: 6 }}>{newPersonError}</Text> : null}
+          <Button
+            title="Aggiungi"
+            icon="person-add"
+            variant="secondary"
+            onPress={quickAdd}
+            disabled={!newPerson.trim() || !newPersonEmail.trim()}
+            style={{ marginTop: spacing.sm }}
+          />
         </View>
       </Card>
 

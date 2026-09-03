@@ -1,6 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { isValidEmail, normalizeEmail } from "@/domain/validate";
 import { PERSON_COLORS, useStore } from "@/store/store";
 import { Avatar, Button, Card, Screen, SectionHeader, TextField } from "@/ui/components";
 import { confirm, notify } from "@/ui/dialogs";
@@ -19,19 +20,34 @@ export default function PersonEditScreen() {
   const peopleCount = useStore((s) => s.data.people.length);
 
   const [name, setName] = useState(existing?.name ?? "");
+  const [email, setEmail] = useState(existing?.email ?? "");
   const [color, setColor] = useState(existing?.color ?? PERSON_COLORS[peopleCount % PERSON_COLORS.length]);
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const save = () => {
+    setError(null);
+    setEmailError(null);
     if (!name.trim()) {
       setError("Inserisci un nome.");
       return;
     }
+    if (!existing?.isSelf) {
+      if (!email.trim()) {
+        setEmailError("Ogni persona deve avere un'email.");
+        return;
+      }
+      if (!isValidEmail(email)) {
+        setEmailError("Questa email non sembra valida.");
+        return;
+      }
+    }
+    const normalizedEmail = email.trim() ? normalizeEmail(email) : null;
     if (existing) {
-      updatePerson(existing.id, { name: name.trim(), color });
+      updatePerson(existing.id, { name: name.trim(), email: normalizedEmail, color });
       if (existing.isSelf) updateSettings({ ownerName: name.trim() });
     } else {
-      addPerson({ name, color });
+      addPerson({ name, email: normalizedEmail, color });
     }
     router.back();
   };
@@ -56,6 +72,17 @@ export default function PersonEditScreen() {
           <Avatar name={name || "?"} color={color} size={84} />
         </View>
         <TextField label="Nome" value={name} onChangeText={setName} placeholder="Es. Giulia" autoFocus={!existing} error={error} />
+        {!existing?.isSelf ? (
+          <TextField
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="giulia@esempio.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            error={emailError}
+          />
+        ) : null}
         <Text style={{ color: t.textMuted, fontSize: font.small, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 }}>Colore</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
           {PERSON_COLORS.map((c) => (

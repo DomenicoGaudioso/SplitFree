@@ -34,6 +34,7 @@ function memberToPerson(uid: string, m: CloudMemberDoc, selfUid: string | null):
   return {
     id: uid,
     name: m.name,
+    email: m.email,
     color: m.color,
     isSelf: uid === selfUid,
     archivedAt: null,

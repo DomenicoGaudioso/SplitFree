@@ -21,6 +21,8 @@ App per dividere le spese in stile Splitwise: **gratuita, open source, senza pub
 - **Allegati locali**: foto di ricevute (galleria o fotocamera) e PDF, copiati a piena risoluzione nella memoria privata dell'app.
 - **Backup**: esportazione e importazione di un file JSON per spostare i dati fra dispositivi.
 - **Tema chiaro/scuro**, interfaccia in italiano.
+- **Navigazione in alto**, non in basso: sul telefono i pulsanti di sistema (Android) o l'indicatore gesture (iOS) stanno già in fondo allo schermo. Si passa da una sezione all'altra toccando la barra in alto oppure trascinando il dito a destra o sinistra sul contenuto.
+- **Email per ogni persona**: aggiungendo qualcuno a un gruppo (o dalla scheda Persone) va indicata anche la sua email.
 
 ## Download
 
