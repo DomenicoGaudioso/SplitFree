@@ -147,3 +147,19 @@ export async function sendPasswordReset(config: FirebaseWebConfig, email: string
   await FirebaseAuth.sendPasswordResetEmail(auth, email.trim());
 }
 
+/** Restituisce l'utente già autenticato sull'istanza Auth (se presente) in modo sincrono */
+export function getExistingAuthUser(config: FirebaseWebConfig): CloudAuthUser | null {
+  const auth = authFor(config);
+  return auth.currentUser ? toAuthUser(auth.currentUser) : null;
+}
+
+/**
+ * Assicura che ci sia un utente autenticato: restituisce l'utente corrente se presente,
+ * altrimenti esegue un accesso rapido trasparente come ospite con il nome fornito.
+ */
+export async function ensureAuthUser(config: FirebaseWebConfig, preferredName?: string): Promise<CloudAuthUser> {
+  const existing = getExistingAuthUser(config);
+  if (existing) return existing;
+  return await signInAsGuest(config, preferredName);
+}
+

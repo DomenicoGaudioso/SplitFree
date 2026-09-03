@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
-import { useCloudAuthUser } from "@/cloud/auth";
+import { ensureAuthUser, useCloudAuthUser } from "@/cloud/auth";
 import { cloudJoinGroup } from "@/cloud/cloudGroup";
 import { decodeInvite, type InvitePayload } from "@/cloud/invites";
 import type { Group } from "@/domain/types";
@@ -45,12 +45,16 @@ export default function JoinScreen() {
     setPayload(decoded);
   };
 
-  const join = async () => {
-    if (!payload || !authUser) return;
+  const joinOneClick = async () => {
+    if (!payload) return;
     setJoining(true);
     setJoinError(null);
     try {
-      const result = await cloudJoinGroup(payload, authUser);
+      let user = authUser;
+      if (!user) {
+        user = await ensureAuthUser(payload.config, self?.name || "Nuovo Membro");
+      }
+      const result = await cloudJoinGroup(payload, user);
       if (!result.ok) {
         setJoinError(result.error);
         return;
@@ -129,12 +133,20 @@ export default function JoinScreen() {
                     <Text style={{ color: t.text, flex: 1 }}>Entrerai come {authUser.name}</Text>
                     <Ionicons name="checkmark-circle" size={20} color={t.positive} />
                   </View>
-                  <Button title="Entra nel gruppo" icon="log-in-outline" onPress={() => void join()} loading={joining} />
+                  <Button title="Entra subito nel gruppo (1 Click)" icon="log-in-outline" size="lg" onPress={() => void joinOneClick()} loading={joining} />
                 </>
               ) : (
                 <>
+                  <Button
+                    title="Entra subito nel gruppo (1 Click)"
+                    icon="flash-outline"
+                    size="lg"
+                    onPress={() => void joinOneClick()}
+                    loading={joining}
+                    style={{ marginBottom: spacing.md }}
+                  />
                   <Text style={{ color: t.textMuted, fontSize: font.small, marginBottom: spacing.sm }}>
-                    Scegli come accedere per unirti al gruppo (Google, Microsoft, Email o Ospite):
+                    Oppure accedi prima con il tuo account preferito:
                   </Text>
                   <CloudSignInButtons config={payload.config} googleClientId={payload.googleClientId} microsoftClientId={payload.microsoftClientId} />
                 </>

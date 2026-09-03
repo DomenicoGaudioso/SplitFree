@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { shareGroupOneClick } from "@/cloud/oneClickShare";
 import { CURRENCIES } from "@/domain/money";
 import { isValidEmail, normalizeEmail } from "@/domain/validate";
 import { useStore } from "@/store/store";
@@ -22,6 +23,7 @@ export default function GroupEditScreen() {
   const addGroup = useStore((s) => s.addGroup);
   const updateGroup = useStore((s) => s.updateGroup);
   const addPerson = useStore((s) => s.addPerson);
+  const upsertCloudGroupPointer = useStore((s) => s.upsertCloudGroupPointer);
 
   const [name, setName] = useState(existing?.name ?? "");
   const [emoji, setEmoji] = useState(existing?.emoji ?? "👥");
@@ -31,6 +33,8 @@ export default function GroupEditScreen() {
   const [newPerson, setNewPerson] = useState("");
   const [newPersonEmail, setNewPersonEmail] = useState("");
   const [newPersonError, setNewPersonError] = useState<string | null>(null);
+  const [shareInCloud, setShareInCloud] = useState(!existing);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const candidates = useMemo(() => people.filter((p) => !p.archivedAt || memberIds.includes(p.id)), [people, memberIds]);
@@ -42,22 +46,21 @@ export default function GroupEditScreen() {
   const quickAdd = () => {
     const n = newPerson.trim();
     if (!n) return;
-    if (!newPersonEmail.trim()) {
-      setNewPersonError("Serve un'email per la nuova persona.");
-      return;
-    }
-    if (!isValidEmail(newPersonEmail)) {
+    if (newPersonEmail.trim() && !isValidEmail(newPersonEmail)) {
       setNewPersonError("Questa email non sembra valida.");
       return;
     }
-    const p = addPerson({ name: n, email: normalizeEmail(newPersonEmail) });
+    const p = addPerson({
+      name: n,
+      email: newPersonEmail.trim() ? normalizeEmail(newPersonEmail) : null,
+    });
     setMemberIds((ids) => [...ids, p.id]);
     setNewPerson("");
     setNewPersonEmail("");
     setNewPersonError(null);
   };
 
-  const save = () => {
+  const save = async () => {
     if (!name.trim()) {
       setError("Dai un nome al gruppo.");
       return;
@@ -70,7 +73,24 @@ export default function GroupEditScreen() {
       updateGroup(existing.id, { name, emoji, description, currency, memberIds });
       router.back();
     } else {
+      setSaving(true);
       const g = addGroup({ name, emoji, description, currency, memberIds });
+      if (shareInCloud) {
+        try {
+          await shareGroupOneClick({
+            group: g,
+            people,
+            expenses: [],
+            settlements: [],
+            self,
+            onCloudLinked: (updated) => {
+              upsertCloudGroupPointer(updated);
+            },
+          });
+        } catch {
+          // Ignora se la condivisione viene annullata dall'utente
+        }
+      }
       router.replace({ pathname: "/group/[id]", params: { id: g.id } });
     }
   };
@@ -103,6 +123,36 @@ export default function GroupEditScreen() {
         />
         {existing && existing.currency !== currency ? (
           <Text style={{ color: t.warning, fontSize: font.small }}>Le spese già registrate restano nella loro valuta; cambia il tasso nelle spese se serve.</Text>
+        ) : null}
+        {!existing ? (
+          <Pressable
+            onPress={() => setShareInCloud((v) => !v)}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              backgroundColor: shareInCloud ? t.primarySoft : t.surfaceAlt,
+              padding: spacing.md,
+              borderRadius: radius.md,
+              marginTop: spacing.md,
+              borderWidth: 1,
+              borderColor: shareInCloud ? t.primary : t.border,
+            }}
+          >
+            <Ionicons
+              name={shareInCloud ? "checkbox" : "square-outline"}
+              size={22}
+              color={shareInCloud ? t.primary : t.textMuted}
+              style={{ marginRight: spacing.sm }}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.text, fontWeight: "700", fontSize: font.body }}>
+                Condividi subito nel cloud (1 click)
+              </Text>
+              <Text style={{ color: t.textMuted, fontSize: font.tiny }}>
+                Abilita la sincronizzazione in tempo reale e apre subito il foglio di condivisione
+              </Text>
+            </View>
+          </Pressable>
         ) : null}
       </Card>
 
@@ -145,7 +195,7 @@ export default function GroupEditScreen() {
                   setNewPersonEmail(v);
                   setNewPersonError(null);
                 }}
-                placeholder="Email"
+                placeholder="Email (facoltativa)"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 onSubmitEditing={quickAdd}
@@ -160,14 +210,21 @@ export default function GroupEditScreen() {
             icon="person-add"
             variant="secondary"
             onPress={quickAdd}
-            disabled={!newPerson.trim() || !newPersonEmail.trim()}
+            disabled={!newPerson.trim()}
             style={{ marginTop: spacing.sm }}
           />
         </View>
       </Card>
 
       <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm }}>
-        <Button title={existing ? "Salva modifiche" : "Crea gruppo"} icon="checkmark" size="lg" onPress={save} style={{ flex: 1 }} />
+        <Button
+          title={existing ? "Salva modifiche" : "Crea gruppo"}
+          icon="checkmark"
+          size="lg"
+          loading={saving}
+          onPress={save}
+          style={{ flex: 1 }}
+        />
         <Button title="Annulla" variant="secondary" size="lg" onPress={() => router.back()} />
       </View>
     </Screen>

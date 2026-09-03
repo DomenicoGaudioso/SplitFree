@@ -1,7 +1,8 @@
+import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { parseFirebaseConfigSnippet } from "@/cloud/configParse";
 import {
   authenticateGoogleDrive,
@@ -51,6 +52,7 @@ export default function SettingsScreen() {
   const [cloudStorageBusy, setCloudStorageBusy] = useState<string | null>(null);
 
   const [addingProject, setAddingProject] = useState(false);
+  const [showAdvancedCloud, setShowAdvancedCloud] = useState(false);
   const [projectLabel, setProjectLabel] = useState("");
   const [configText, setConfigText] = useState("");
   const [configError, setConfigError] = useState<string | null>(null);
@@ -468,64 +470,91 @@ export default function SettingsScreen() {
 
       {/* 3. Gruppi condivisi */}
       <SectionHeader
-        title="Gruppi condivisi in tempo reale"
+        title="Condivisione & Scambio Cloud"
         right={<Button title="Ho un invito" size="sm" variant="ghost" icon="link" onPress={() => router.push("/join")} />}
       />
       <Card>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm }}>
+          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.positive }} />
+          <Text style={{ color: t.text, fontWeight: "800", fontSize: font.body }}>
+            Cloud SplitFree: Attivo e Pronto all'uso (1-Click)
+          </Text>
+        </View>
         <Text style={{ color: t.textMuted, fontSize: font.small, lineHeight: 20, marginBottom: spacing.md }}>
-          Dividi le spese in tempo reale con altre persone. Accedi direttamente con il tuo account Microsoft, Google, Email o come Ospite.
-          Tutti i membri possono aggiungere spese istantaneamente.
+          La condivisione in tempo reale e lo scambio di spese sono già abilitati. Puoi condividere qualsiasi gruppo con 1 tocco direttamente dalla schermata del gruppo o quando ne crei uno nuovo. Chi riceve il link entra istantaneamente con un click.
         </Text>
 
-        {settings.cloudProjects.length === 0 ? (
-          <EmptyState
-            icon="cloud-outline"
-            title="Nessun progetto collegato"
-            message="Serve solo la prima volta che vuoi creare un gruppo condiviso."
-          />
-        ) : (
-          settings.cloudProjects.map((p) => (
-            <CloudProjectCard
-              key={p.id}
-              project={p}
-              onUpdate={(patch) => updateCloudProject(p.id, patch)}
-              onRemove={() => removeCloudProject(p.id)}
-            />
-          ))
-        )}
-
-        {addingProject ? (
-          <View style={{ marginTop: spacing.sm }}>
-            <TextField label="Nome etichetta (facoltativo)" value={projectLabel} onChangeText={setProjectLabel} placeholder="Es. Il mio Firebase" />
-            <TextField
-              label="Configurazione Firebase"
-              value={configText}
-              onChangeText={(v) => {
-                setConfigText(v);
-                setConfigError(null);
-              }}
-              placeholder={"Incolla qui lo snippet da\nImpostazioni progetto → Le tue app"}
-              multiline
-              numberOfLines={5}
-              autoCapitalize="none"
-              style={{ minHeight: 100, textAlignVertical: "top" }}
-              error={configError}
-            />
-            <View style={{ flexDirection: "row", gap: spacing.sm }}>
-              <Button title="Collega" onPress={saveProject} />
-              <Button title="Annulla" variant="secondary" onPress={() => setAddingProject(false)} />
-            </View>
-          </View>
-        ) : (
+        <View style={{ flexDirection: "row", gap: spacing.sm, flexWrap: "wrap", marginBottom: spacing.sm }}>
           <Button
-            title="Aggiungi un progetto Firebase personale"
-            icon="add"
-            variant="ghost"
+            title="Unisciti a un gruppo con link"
+            icon="enter-outline"
+            variant="secondary"
             size="sm"
-            onPress={() => setAddingProject(true)}
-            style={{ marginTop: spacing.xs }}
+            onPress={() => router.push("/join")}
           />
-        )}
+        </View>
+
+        {/* Opzioni avanzate per sviluppatori */}
+        <View style={{ borderTopWidth: 1, borderTopColor: t.border, paddingTop: spacing.md, marginTop: spacing.xs }}>
+          <Pressable
+            onPress={() => setShowAdvancedCloud((v) => !v)}
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+          >
+            <Text style={{ color: t.textMuted, fontSize: font.tiny, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              Opzioni avanzate (Firebase personale)
+            </Text>
+            <Ionicons name={showAdvancedCloud ? "chevron-up" : "chevron-down"} size={16} color={t.textMuted} />
+          </Pressable>
+
+          {showAdvancedCloud ? (
+            <View style={{ marginTop: spacing.md }}>
+              <Text style={{ color: t.textFaint, fontSize: font.tiny, marginBottom: spacing.sm }}>
+                Se preferisci usare un tuo backend Firebase indipendente invece del cloud SplitFree predefinito, puoi collegarlo qui sotto.
+              </Text>
+              {settings.cloudProjects.map((p) => (
+                <CloudProjectCard
+                  key={p.id}
+                  project={p}
+                  onUpdate={(patch) => updateCloudProject(p.id, patch)}
+                  onRemove={() => removeCloudProject(p.id)}
+                />
+              ))}
+
+              {addingProject ? (
+                <View style={{ marginTop: spacing.sm }}>
+                  <TextField label="Nome etichetta (facoltativo)" value={projectLabel} onChangeText={setProjectLabel} placeholder="Es. Il mio Firebase" />
+                  <TextField
+                    label="Configurazione Firebase"
+                    value={configText}
+                    onChangeText={(v) => {
+                      setConfigText(v);
+                      setConfigError(null);
+                    }}
+                    placeholder={"Incolla qui lo snippet da\nImpostazioni progetto → Le tue app"}
+                    multiline
+                    numberOfLines={5}
+                    autoCapitalize="none"
+                    style={{ minHeight: 100, textAlignVertical: "top" }}
+                    error={configError}
+                  />
+                  <View style={{ flexDirection: "row", gap: spacing.sm }}>
+                    <Button title="Collega" onPress={saveProject} />
+                    <Button title="Annulla" variant="secondary" onPress={() => setAddingProject(false)} />
+                  </View>
+                </View>
+              ) : (
+                <Button
+                  title="Aggiungi un progetto Firebase personale"
+                  icon="add"
+                  variant="ghost"
+                  size="sm"
+                  onPress={() => setAddingProject(true)}
+                  style={{ marginTop: spacing.xs }}
+                />
+              )}
+            </View>
+          ) : null}
+        </View>
       </Card>
 
       {/* 4. Informazioni */}

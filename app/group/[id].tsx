@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { cloudDeleteGroupEntirely, cloudLeaveGroup } from "@/cloud/cloudGroup";
+import { shareGroupOneClick } from "@/cloud/oneClickShare";
 import { formatIsoDate, monthKey, monthLabelLong } from "@/domain/dates";
 import { formatMinor } from "@/domain/money";
 import { useGroupActions } from "@/store/groupActions";
@@ -29,7 +30,7 @@ import { confirm, notify } from "@/ui/dialogs";
 import { font, spacing, useTheme } from "@/ui/theme";
 
 type Tab = "expenses" | "balances" | "settlements";
-type LocalMenuAction = "edit" | "archive" | "delete";
+type LocalMenuAction = "share" | "edit" | "archive" | "delete";
 type CloudMenuAction = "invite" | "leave" | "deleteAll";
 
 export default function GroupDetailScreen() {
@@ -44,10 +45,12 @@ export default function GroupDetailScreen() {
   const finance = useGroupFinance(group, expenses, settlements);
   const deleteSettlement = useStore((s) => s.deleteSettlement);
   const deleteLocalPointer = useStore((s) => s.deleteGroup);
+  const upsertCloudGroupPointer = useStore((s) => s.upsertCloudGroupPointer);
   const [tab, setTab] = useState<Tab>(initialTab ?? "expenses");
   const [menu, setMenu] = useState(false);
   const [simplified, setSimplified] = useState(true);
   const [busyMenu, setBusyMenu] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const isCloud = !!group?.cloud;
   const members = useMemo(() => (group ? group.memberIds.map((m) => people.get(m)).filter((p): p is NonNullable<typeof p> => !!p) : []), [group, people]);
@@ -89,7 +92,37 @@ export default function GroupDetailScreen() {
     );
   }
 
+  const handleOneClickShare = async () => {
+    setSharing(true);
+    try {
+      const allPeopleList = Array.from(people.values());
+      const res = await shareGroupOneClick({
+        group,
+        people: allPeopleList,
+        expenses,
+        settlements,
+        self,
+        onCloudLinked: (updated) => {
+          upsertCloudGroupPointer(updated);
+        },
+      });
+      if (!res.ok) {
+        notify("Condivisione non riuscita", res.error || "Si è verificato un errore");
+      } else if (Platform.OS === "web") {
+        notify("Link copiato!", "Il link di invito è pronto e copiato negli appunti. Invialo ai partecipanti.");
+      }
+    } catch (err) {
+      notify("Errore", String(err));
+    } finally {
+      setSharing(false);
+    }
+  };
+
   const onLocalMenu = async (action: LocalMenuAction) => {
+    if (action === "share") {
+      void handleOneClickShare();
+      return;
+    }
     if (action === "edit") router.push({ pathname: "/group/edit", params: { id: group.id } });
     if (action === "archive") void actions.archive(!group.archivedAt);
     if (action === "delete") {
@@ -107,7 +140,7 @@ export default function GroupDetailScreen() {
   const onCloudMenu = async (action: CloudMenuAction) => {
     if (!group.cloud) return;
     if (action === "invite") {
-      router.push({ pathname: "/group/invite", params: { id: group.id } });
+      void handleOneClickShare();
       return;
     }
     if (action === "leave") {
@@ -183,6 +216,26 @@ export default function GroupDetailScreen() {
                 </Text>
               </View>
             </View>
+          </View>
+          <View style={{ marginTop: spacing.md, flexDirection: "row", gap: spacing.sm, alignItems: "center" }}>
+            <Button
+              title={isCloud ? "Invita (1 click)" : "Condividi nel cloud (1 click)"}
+              icon={isCloud ? "share-social-outline" : "cloud-upload-outline"}
+              size="sm"
+              variant={isCloud ? "secondary" : "primary"}
+              loading={sharing}
+              onPress={() => void handleOneClickShare()}
+              style={{ flex: 1 }}
+            />
+            {isCloud ? (
+              <Button
+                title="Dettagli invito"
+                icon="qr-code-outline"
+                size="sm"
+                variant="ghost"
+                onPress={() => router.push({ pathname: "/group/invite", params: { id: group.id } })}
+              />
+            ) : null}
           </View>
           <View style={[styles.statsRow, { borderTopColor: t.border }]}>
             <View style={{ flex: 1 }}>
@@ -358,7 +411,7 @@ export default function GroupDetailScreen() {
           visible={menu}
           title={group.name}
           items={[
-            { value: "invite", label: "Invita persone", subtitle: "Genera un link di invito", leading: <Ionicons name="person-add-outline" size={22} color={t.text} /> },
+            { value: "invite", label: "Invita persone (1 click)", subtitle: "Condividi subito il link", leading: <Ionicons name="share-social-outline" size={22} color={t.text} /> },
             { value: "leave", label: "Esci dal gruppo", subtitle: "Non vedrai più questo gruppo", leading: <Ionicons name="exit-outline" size={22} color={t.text} /> },
             ...(isOwner
               ? [{ value: "deleteAll" as const, label: "Elimina gruppo per tutti", subtitle: "Cancella tutto, per ogni membro", leading: <Ionicons name="trash-outline" size={22} color={t.negative} /> }]
@@ -372,6 +425,7 @@ export default function GroupDetailScreen() {
           visible={menu}
           title={group.name}
           items={[
+            { value: "share", label: "Condividi nel cloud (1 click)", subtitle: "Sincronizza in tempo reale e invita", leading: <Ionicons name="cloud-upload-outline" size={22} color={t.primary} /> },
             { value: "edit", label: "Modifica gruppo", subtitle: "Nome, valuta, membri", leading: <Ionicons name="create-outline" size={22} color={t.text} /> },
             { value: "archive", label: group.archivedAt ? "Ripristina" : "Archivia", subtitle: "Nascondi dalla lista principale", leading: <Ionicons name="archive-outline" size={22} color={t.text} /> },
             { value: "delete", label: "Elimina gruppo", subtitle: "Cancella spese e rimborsi", leading: <Ionicons name="trash-outline" size={22} color={t.negative} /> },

@@ -95,17 +95,7 @@ export default function GroupsScreen() {
           </>
         ) : null}
       </Screen>
-      <Fab label="Gruppo" onPress={() => setNewMenu(true)} />
-      <PickerSheet<"local" | "cloud">
-        visible={newMenu}
-        title="Nuovo gruppo"
-        items={[
-          { value: "local", label: "Gruppo locale", subtitle: "Solo su questo telefono, come sempre", leading: <Ionicons name="phone-portrait-outline" size={22} color={t.text} /> },
-          { value: "cloud", label: "Gruppo condiviso", subtitle: "In tempo reale con altre persone", leading: <Ionicons name="cloud-outline" size={22} color={t.text} /> },
-        ]}
-        onSelect={(v) => router.push(v === "local" ? "/group/edit" : "/group/share-new")}
-        onClose={() => setNewMenu(false)}
-      />
+      <Fab label="Gruppo" onPress={() => router.push("/group/edit")} />
     </View>
   );
 }
