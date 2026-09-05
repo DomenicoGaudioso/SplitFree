@@ -10,18 +10,25 @@ import {
   cloudUpdateGroupInfo,
 } from "@/cloud/cloudGroup";
 import {
+  formatExpenseDeletedMessage,
+  formatExpenseEditedMessage,
   formatExpenseMessage,
   formatSettlementMessage,
+  resolveNotifyTarget,
   sendTelegramMessage,
 } from "@/cloud/telegram";
 import { pushSharedGroup } from "@/cloud/fileShare/sync";
 import { useStore, type ExpenseInput, type GroupInput } from "./store";
 
-/** Invia una notifica Telegram in fire-and-forget: mai bloccare l'UI, mai propagare errori. */
-function notifyTelegram(text: string): void {
-  const tg = useStore.getState().data.settings.telegram;
-  if (!tg) return;
-  void sendTelegramMessage(tg, text).catch(() => {});
+/**
+ * Invia una notifica Telegram in fire-and-forget: mai bloccare l'UI, mai propagare errori.
+ * La destinazione la decide resolveNotifyTarget: gruppo Telegram del gruppo condiviso
+ * se esiste, altrimenti la chat globale delle Impostazioni.
+ */
+function notifyTelegram(group: Group | undefined | null, text: string): void {
+  const target = resolveNotifyTarget(group, useStore.getState().data.settings.telegram);
+  if (!target) return;
+  void sendTelegramMessage(target, text).catch(() => {});
 }
 
 /** Nome di chi esegue l'azione (la persona marcata isSelf). */
@@ -34,10 +41,23 @@ function personName(id: string): string {
   return useStore.getState().data.people.find((p) => p.id === id)?.name ?? "?";
 }
 
+/** Nomi delle persone dagli id, deduplicati preservando l'ordine. */
+function personNames(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(personName(id));
+  }
+  return out;
+}
+
 export type GroupActions = {
   addExpense: (input: ExpenseInput) => Promise<string>;
   updateExpense: (id: string, input: ExpenseInput) => Promise<void>;
-  deleteExpense: (id: string) => Promise<void>;
+  /** `title` (facoltativo) viene dal chiamante per la notifica di eliminazione; se manca si cerca nello store. */
+  deleteExpense: (id: string, title?: string) => Promise<void>;
   addSettlement: (input: Omit<Settlement, "id" | "createdAt" | "groupId">) => Promise<string>;
   deleteSettlement: (id: string) => Promise<void>;
   updateInfo: (patch: Partial<Pick<GroupInput, "name" | "emoji" | "description" | "currency">>) => Promise<void>;
@@ -66,18 +86,36 @@ export function useGroupActions(group: Group | undefined): GroupActions {
   const groupCurrency = group?.currency ?? "EUR";
 
   return useMemo<GroupActions>(() => {
-    const notifyExpense = (input: ExpenseInput) =>
+    const notifyExpenseAdded = (input: ExpenseInput) =>
       notifyTelegram(
+        group,
         formatExpenseMessage({
           actorName: selfName(),
           title: input.title.trim(),
           amountMinor: input.amountMinor,
           currency: input.currency,
-          groupName,
+          payerNames: personNames(input.payers.map((p) => p.personId)),
+          participantNames: personNames(input.splits.map((s) => s.personId)),
         })
       );
+    const notifyExpenseEdited = (input: ExpenseInput) =>
+      notifyTelegram(
+        group,
+        formatExpenseEditedMessage({
+          actorName: selfName(),
+          title: input.title.trim(),
+          amountMinor: input.amountMinor,
+          currency: input.currency,
+        })
+      );
+    /** Il titolo serve dopo la cancellazione: lo passa il chiamante o si legge dallo store prima di eliminare. */
+    const notifyExpenseDeleted = (id: string, title?: string) => {
+      const resolved = title ?? useStore.getState().data.expenses.find((e) => e.id === id)?.title ?? "la spesa";
+      notifyTelegram(group, formatExpenseDeletedMessage({ actorName: selfName(), title: resolved }));
+    };
     const notifySettlement = (input: Omit<Settlement, "id" | "createdAt" | "groupId">) =>
       notifyTelegram(
+        group,
         formatSettlementMessage({
           actorName: selfName(),
           toName: personName(input.toPersonId),
@@ -91,11 +129,17 @@ export function useGroupActions(group: Group | undefined): GroupActions {
       return {
         addExpense: async (input) => {
           const id = await cloudAddExpense(cloud, input);
-          notifyExpense(input);
+          notifyExpenseAdded(input);
           return id;
         },
-        updateExpense: (id, input) => cloudUpdateExpense(cloud, id, input),
-        deleteExpense: (id) => cloudDeleteExpense(cloud, id),
+        updateExpense: async (id, input) => {
+          await cloudUpdateExpense(cloud, id, input);
+          notifyExpenseEdited(input);
+        },
+        deleteExpense: async (id, title) => {
+          notifyExpenseDeleted(id, title);
+          await cloudDeleteExpense(cloud, id);
+        },
         addSettlement: async (input) => {
           const id = await cloudAddSettlement(cloud, input);
           notifySettlement(input);
@@ -113,15 +157,17 @@ export function useGroupActions(group: Group | undefined): GroupActions {
       return {
         addExpense: async (input) => {
           const id = addExpenseLocal(input).id;
-          notifyExpense(input);
+          notifyExpenseAdded(input);
           sync();
           return id;
         },
         updateExpense: async (id, input) => {
           updateExpenseLocal(id, input);
+          notifyExpenseEdited(input);
           sync();
         },
-        deleteExpense: async (id) => {
+        deleteExpense: async (id, title) => {
+          notifyExpenseDeleted(id, title);
           await deleteExpenseLocal(id);
           sync();
         },
@@ -148,11 +194,17 @@ export function useGroupActions(group: Group | undefined): GroupActions {
     return {
       addExpense: async (input) => {
         const id = addExpenseLocal(input).id;
-        notifyExpense(input);
+        notifyExpenseAdded(input);
         return id;
       },
-      updateExpense: async (id, input) => updateExpenseLocal(id, input),
-      deleteExpense: async (id) => deleteExpenseLocal(id),
+      updateExpense: async (id, input) => {
+        updateExpenseLocal(id, input);
+        notifyExpenseEdited(input);
+      },
+      deleteExpense: async (id, title) => {
+        notifyExpenseDeleted(id, title);
+        await deleteExpenseLocal(id);
+      },
       addSettlement: async (input) => {
         const id = addSettlementLocal({ ...input, groupId: groupId! }).id;
         notifySettlement(input);
@@ -165,6 +217,7 @@ export function useGroupActions(group: Group | undefined): GroupActions {
   }, [
     cloud,
     fileShare,
+    group,
     groupId,
     groupName,
     groupCurrency,

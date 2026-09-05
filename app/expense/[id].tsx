@@ -51,7 +51,7 @@ export default function ExpenseDetailScreen() {
   const onDelete = async () => {
     const ok = await confirm("Eliminare la spesa?", `"${expense.title}" e i suoi ${attachments.length} allegati verranno eliminati.`, { confirmText: "Elimina", destructive: true });
     if (!ok) return;
-    await actions.deleteExpense(expense.id);
+    await actions.deleteExpense(expense.id, expense.title);
     router.back();
   };
 

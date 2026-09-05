@@ -159,13 +159,17 @@ La vecchia via manuale (cercare la Chat ID con @userinfobot o `getUpdates` e inc
 
 ## Notifiche Telegram
 
-Si può ricevere un messaggio su Telegram ogni volta che qualcuno aggiunge una spesa o un rimborso in un gruppo. Non serve nessun server: è l'app stessa a chiamare la Bot API di Telegram dal dispositivo di chi esegue l'azione, con un **bot creato da te**.
+Si può ricevere un messaggio su Telegram ogni volta che qualcuno aggiunge, modifica o elimina una spesa, o registra un rimborso. Non serve nessun server: è l'app stessa a chiamare la Bot API di Telegram dal dispositivo di chi esegue l'azione, con un **bot creato da te**.
 
-### Setup (una volta sola)
+**Dove arrivano le notifiche**: se il gruppo è [condiviso via Telegram](#condividere-via-telegram-consigliato), i messaggi vanno **nel gruppo Telegram dedicato di quel gruppo** (sempre attivi, senza configurare nulla). Altrimenti vanno nella chat globale configurata nelle Impostazioni.
+
+I messaggi delle spese sono ricchi: `💸 Domenico ha aggiunto "Spesa coop" · 13,50 €` seguito da `Pagato da: … · Diviso fra: …` (oltre 4 partecipanti l'elenco si compatta in "Primo, Secondo +N"). Modifiche ed eliminazioni hanno messaggi dedicati (✏️ / 🗑️). Anche la caption del documento pinnato è leggibile: `📊 SplitFree · Vacanza · 12 spese · aggiornato 18:47`.
+
+### Setup della chat globale (fallback, una volta sola)
 
 1. Apri Telegram e scrivi a **@BotFather** → comando `/newbot` per creare il bot e copiare il **token**.
 2. Aggiungi il bot al gruppo Telegram dei partecipanti (o scrivigli in privato, se le notifiche le vuoi solo tu).
-3. Trova la **Chat ID**: scrivi a **@userinfobot**, oppure visita `https://api.telegram.org/bot<TOKEN>/getUpdates` dopo aver scritto un messaggio al bot (per i gruppi la Chat ID è negativa, es. `-1001234567890`).
+3. Trova la **Chat ID**: scrivi a **@userinfobot**, oppure visita `https://api.telegram.org/bot<TOKEN>/getUpdates` dopo aver scritto un messaggio al bot (per i gruppi la Chat ID è negativa, es. `-1001234567890`). Con i gruppi condivisi via Telegram questa caccia non serve: fa tutto il wizard.
 4. In SplitFree: **Impostazioni → Notifiche Telegram** → incolla token e Chat ID, premi **Invia messaggio di prova** per verificare, poi attiva le notifiche.
 
 Il token resta salvato solo sul dispositivo; ogni dispositivo che vuole inviare notifiche va configurato a sé (basta lo stesso bot e la stessa Chat ID).

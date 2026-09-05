@@ -95,8 +95,17 @@ describe("helper puri", () => {
     );
   });
 
-  it("docCaption riporta la revisione del documento", () => {
-    expect(docCaption({ ...doc, revision: 7 })).toBe("SplitFree · revisione 7");
+  it("docCaption: nome gruppo, conteggio spese e ora di aggiornamento", () => {
+    const now = new Date(2026, 8, 4, 18, 47); // 4 settembre 2026, 18:47 locali
+    expect(docCaption(doc, undefined, now)).toBe("📊 SplitFree · Vacanza · 0 spese · aggiornato 18:47");
+    // groupName esplicito ha la precedenza sul nome nel documento; singolare per 1 spesa.
+    const withExpense = buildDoc(group, [self], [{
+      id: "e1", groupId: "g1", title: "Pizza", notes: "", categoryId: "food", date: "2026-01-10",
+      currency: "EUR", amountMinor: 1000, exchangeRate: 1, splitMethod: "equal",
+      payers: [{ personId: "p1", amountMinor: 1000 }], splits: [{ personId: "p1", amountMinor: 1000 }],
+      createdAt: "2026-01-10T10:00:00.000Z", updatedAt: "2026-01-10T10:00:00.000Z",
+    }], []);
+    expect(docCaption(withExpense, "Vacanza 🏖️", now)).toBe("📊 SplitFree · Vacanza 🏖️ · 1 spesa · aggiornato 18:47");
   });
 
   it("parsePinnedDocument: document pinnato -> fileId e messageId", () => {
@@ -206,14 +215,15 @@ describe("publishDoc", () => {
     expect(messageId).toBe(77);
 
     expect(calls).toHaveLength(2);
-    // 1) sendDocument: multipart col JSON del gruppo e la caption di revisione.
+    // 1) sendDocument: multipart col JSON del gruppo e la caption leggibile.
     const [send, pin] = calls;
     expect(send.url).toBe(tgApiUrl(creds.botToken, "sendDocument"));
     const contentType = (send.init?.headers as Record<string, string>)["Content-Type"];
     expect(contentType).toMatch(/^multipart\/form-data; boundary=/);
     const body = String(send.init?.body);
     expect(body).toContain(`name="chat_id"\r\n\r\n${creds.chatId}`);
-    expect(body).toContain(`name="caption"\r\n\r\nSplitFree · revisione ${doc.revision}`);
+    // Caption umana: nome gruppo + conteggio spese (l'ora dipende dal clock locale).
+    expect(body).toContain('name="caption"\r\n\r\n📊 SplitFree · Vacanza · 0 spese · aggiornato ');
     expect(body).toContain(`name="document"; filename="${TG_DOC_FILENAME}"`);
     expect(body).toContain('"groupId": "g1"');
     // 2) pinChatMessage DOPO sendDocument, silenzioso, sul nuovo messaggio.

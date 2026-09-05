@@ -388,7 +388,15 @@ export default function ExpenseEditScreen() {
       </Card>
 
       {/* Divisione */}
-      <SectionHeader title="Diviso fra" right={<Pressable onPress={equalSplitAll}><Text style={{ color: t.primary, fontWeight: "700", fontSize: font.small }}>Tutti</Text></Pressable>} />
+      <SectionHeader
+        title={`Diviso fra (${participants.length}/${group.memberIds.length})`}
+        right={
+          <View style={{ flexDirection: "row", gap: spacing.md }}>
+            <Pressable onPress={equalSplitAll}><Text style={{ color: t.primary, fontWeight: "700", fontSize: font.small }}>Tutti</Text></Pressable>
+            <Pressable onPress={() => setParticipants([])}><Text style={{ color: t.primary, fontWeight: "700", fontSize: font.small }}>Nessuno</Text></Pressable>
+          </View>
+        }
+      />
       <Card>
         <Segmented<SplitMethod>
           options={[

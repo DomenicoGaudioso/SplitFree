@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  formatExpenseDeletedMessage,
+  formatExpenseEditedMessage,
   formatExpenseMessage,
+  formatNameList,
   formatSettlementMessage,
+  resolveNotifyTarget,
   sendTelegramMessage,
   type TelegramSettings,
 } from "@/cloud/telegram";
+import type { Group } from "@/domain/types";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -17,13 +22,25 @@ describe("formatExpenseMessage", () => {
   it("formatta importi in centesimi come valuta italiana", () => {
     expect(
       norm(formatExpenseMessage({
-        actorName: "Mario",
+        actorName: "Domenico",
         title: "Spesa coop",
         amountMinor: 1350,
         currency: "EUR",
-        groupName: "Casa",
       }))
-    ).toBe('💸 Mario ha aggiunto "Spesa coop" (13,50 €) nel gruppo "Casa".');
+    ).toBe('💸 Domenico ha aggiunto "Spesa coop" · 13,50 €');
+  });
+
+  it("aggiunge la riga con paganti e partecipanti quando ci sono i nomi", () => {
+    expect(
+      norm(formatExpenseMessage({
+        actorName: "Domenico",
+        title: "Spesa coop",
+        amountMinor: 1350,
+        currency: "EUR",
+        payerNames: ["Domenico"],
+        participantNames: ["Domenico", "Cinzia"],
+      }))
+    ).toBe('💸 Domenico ha aggiunto "Spesa coop" · 13,50 €\nPagato da: Domenico · Diviso fra: Domenico, Cinzia');
   });
 
   it("gestisce valute senza decimali (JPY)", () => {
@@ -33,9 +50,78 @@ describe("formatExpenseMessage", () => {
         title: "Ramen",
         amountMinor: 1200,
         currency: "JPY",
-        groupName: "Viaggio",
       }))
-    ).toBe('💸 Mario ha aggiunto "Ramen" (1200 ¥) nel gruppo "Viaggio".');
+    ).toBe('💸 Mario ha aggiunto "Ramen" · 1200 ¥');
+  });
+});
+
+describe("formatNameList", () => {
+  it("fino a 4 nomi li mostra tutti", () => {
+    expect(formatNameList(["A", "B"])).toBe("A, B");
+    expect(formatNameList(["A", "B", "C", "D"])).toBe("A, B, C, D");
+  });
+
+  it("oltre 4 nomi: primi due + conteggio dei restanti", () => {
+    expect(formatNameList(["Domenico", "Cinzia", "Paolo", "Sara", "Luca"])).toBe("Domenico, Cinzia +3");
+    expect(formatNameList(["A", "B", "C", "D", "E", "F"])).toBe("A, B +4");
+  });
+
+  it("ignora nomi vuoti", () => {
+    expect(formatNameList(["A", " ", ""])).toBe("A");
+  });
+});
+
+describe("formatExpenseEditedMessage / formatExpenseDeletedMessage", () => {
+  it("modifica: matita con titolo e importo", () => {
+    expect(
+      norm(formatExpenseEditedMessage({ actorName: "Domenico", title: "Spesa coop", amountMinor: 1350, currency: "EUR" }))
+    ).toBe('✏️ Domenico ha modificato "Spesa coop" · 13,50 €');
+  });
+
+  it("eliminazione: cestino col titolo", () => {
+    expect(formatExpenseDeletedMessage({ actorName: "Domenico", title: "Spesa coop" })).toBe(
+      '🗑️ Domenico ha eliminato "Spesa coop"',
+    );
+  });
+});
+
+describe("resolveNotifyTarget", () => {
+  const settings: TelegramSettings = { enabled: true, botToken: "TOK-GLOBALE", chatId: "-100999" };
+
+  const telegramGroup: Group = {
+    id: "g1",
+    name: "Vacanza",
+    emoji: "🏖️",
+    description: "",
+    currency: "EUR",
+    memberIds: [],
+    archivedAt: null,
+    createdAt: "2026-01-01T10:00:00.000Z",
+    updatedAt: "2026-01-02T10:00:00.000Z",
+    fileShare: {
+      provider: "telegram",
+      fileId: "-1001234567890",
+      shareUrl: null,
+      ownerName: "Anna",
+      lastSyncedAt: null,
+      telegram: { botToken: "TOK-GRUPPO", chatId: "-1001234567890", messageId: 42 },
+    },
+  };
+
+  it("gruppo condiviso via Telegram -> credenziali del gruppo, anche con enabled=false globale", () => {
+    const target = resolveNotifyTarget(telegramGroup, { ...settings, enabled: false });
+    expect(target).toEqual({ enabled: true, botToken: "TOK-GRUPPO", chatId: "-1001234567890" });
+  });
+
+  it("gruppo normale -> settings globali (flag enabled incluso)", () => {
+    const plain: Group = { ...telegramGroup, fileShare: null };
+    expect(resolveNotifyTarget(plain, settings)).toBe(settings);
+  });
+
+  it("gruppo senza fileShare telegram e senza settings -> null", () => {
+    const plain: Group = { ...telegramGroup, fileShare: null };
+    expect(resolveNotifyTarget(plain, undefined)).toBeNull();
+    expect(resolveNotifyTarget(undefined, undefined)).toBeNull();
   });
 });
 

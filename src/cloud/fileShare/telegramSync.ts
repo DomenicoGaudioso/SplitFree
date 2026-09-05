@@ -44,9 +44,20 @@ export function tgFileDownloadUrl(botToken: string, filePath: string): string {
   return `https://api.telegram.org/file/bot${botToken}/${filePath}`;
 }
 
-/** Caption del documento pubblicato: la revisione rende riconoscibile la versione nella chat. */
-export function docCaption(doc: SharedGroupDoc): string {
-  return `SplitFree · revisione ${doc.revision}`;
+/** "HH:mm" in ora locale, per la caption del documento. */
+function hhmm(d: Date): string {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * Caption del documento pubblicato, leggibile nella chat Telegram:
+ * nome del gruppo, numero di spese e ora dell'aggiornamento
+ * (es. "📊 SplitFree · Vacanza · 12 spese · aggiornato 18:47").
+ * `groupName` può arrivare dal chiamante; altrimenti si usa doc.name.
+ */
+export function docCaption(doc: SharedGroupDoc, groupName?: string, now: Date = new Date()): string {
+  const n = Object.keys(doc.expenses).length;
+  return `📊 SplitFree · ${groupName ?? doc.name} · ${n} ${n === 1 ? "spesa" : "spese"} · aggiornato ${hhmm(now)}`;
 }
 
 /**
@@ -243,8 +254,13 @@ export async function fetchPinnedDoc(
  * Pubblica una nuova versione del documento: sendDocument + pinChatMessage
  * (silenzioso) sul messaggio appena inviato. Ritorna il nuovo messageId.
  * Le versioni precedenti restano nella chat come storico.
+ * `opts.groupName` finisce nella caption; senza, si usa il nome nel documento.
  */
-export async function publishDoc(creds: TelegramShareCreds, doc: SharedGroupDoc): Promise<number> {
+export async function publishDoc(
+  creds: TelegramShareCreds,
+  doc: SharedGroupDoc,
+  opts?: { groupName?: string },
+): Promise<number> {
   const boundary = "----splitfree-telegram-boundary";
   const res = await tgFetch(tgApiUrl(creds.botToken, "sendDocument"), {
     method: "POST",
@@ -252,7 +268,7 @@ export async function publishDoc(creds: TelegramShareCreds, doc: SharedGroupDoc)
     body: buildSendDocumentBody({
       boundary,
       chatId: creds.chatId,
-      caption: docCaption(doc),
+      caption: docCaption(doc, opts?.groupName),
       fileName: TG_DOC_FILENAME,
       json: JSON.stringify(doc, null, 2),
     }),
