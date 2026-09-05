@@ -17,6 +17,7 @@ import type {
   WebDavSettings,
 } from "@/domain/types";
 import { DEFAULT_CATEGORY_ID } from "@/domain/categories";
+import { removePersonFromExpenses } from "@/domain/removePerson";
 import { applyImportOptions, categoryIdFor, type ImportOptions, type ParsedRow } from "@/domain/splitwiseImport";
 import { normalizeEmail } from "@/domain/validate";
 import { getDefaultCloudProject } from "@/cloud/defaultConfig";
@@ -84,7 +85,11 @@ type Store = {
   addPerson: (input: { name: string; email: string | null; color?: string; isSelf?: boolean }) => Person;
   updatePerson: (id: string, patch: Partial<Pick<Person, "name" | "email" | "color">>) => void;
   archivePerson: (id: string, archived: boolean) => void;
-  deletePerson: (id: string) => { ok: boolean; reason?: string };
+  deletePerson: (
+    id: string
+  ) =>
+    | { ok: true; removedExpenses: number; updatedExpenses: number; removedSettlements: number }
+    | { ok: false; reason: string };
 
   addGroup: (input: GroupInput) => Group;
   updateGroup: (id: string, patch: Partial<GroupInput>) => void;
@@ -245,18 +250,30 @@ export const useStore = create<Store>((set, get) => {
     deletePerson: (id) => {
       const d = get().data;
       const person = d.people.find((p) => p.id === id);
-      if (!person) return { ok: false, reason: "Persona non trovata." };
-      if (person.isSelf) return { ok: false, reason: "Non puoi eliminare te stesso." };
-      const used =
-        d.expenses.some((e) => e.payers.some((p) => p.personId === id) || e.splits.some((s) => s.personId === id)) ||
-        d.settlements.some((s) => s.fromPersonId === id || s.toPersonId === id);
-      if (used) return { ok: false, reason: "La persona compare in spese o rimborsi: puoi archiviarla." };
+      if (!person) return { ok: false as const, reason: "Persona non trovata." };
+      if (person.isSelf) return { ok: false as const, reason: "Non puoi eliminare te stesso." };
+      // Sempre eliminabile: quote e pagamenti ripartiti sui rimanenti, rimborsi rimossi.
+      const res = removePersonFromExpenses(d.expenses, d.settlements, id, nowIso());
+      const removedIds = new Set(d.expenses.filter((e) => !res.expenses.some((x) => x.id === e.id)).map((e) => e.id));
+      // Pulizia dei file allegati delle spese eliminate (fire-and-forget).
+      for (const eid of removedIds) {
+        const keys = d.attachments.filter((a) => a.expenseId === eid).map((a) => a.storageKey);
+        void deleteExpenseAttachmentFiles(eid, keys);
+      }
       commit((dd) => ({
         ...dd,
         people: dd.people.filter((p) => p.id !== id),
         groups: dd.groups.map((g) => ({ ...g, memberIds: g.memberIds.filter((m) => m !== id) })),
+        expenses: res.expenses,
+        settlements: res.settlements,
+        attachments: dd.attachments.filter((a) => !removedIds.has(a.expenseId)),
       }));
-      return { ok: true };
+      return {
+        ok: true as const,
+        removedExpenses: res.removedExpenses,
+        updatedExpenses: res.updatedExpenses,
+        removedSettlements: res.removedSettlements,
+      };
     },
 
     addGroup: (input) => {

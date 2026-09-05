@@ -65,17 +65,17 @@ export default function ExpenseEditScreen() {
   const [rateText, setRateText] = useState(existing ? String(existing.exchangeRate) : "1");
   const [rateBusy, setRateBusy] = useState(false);
   const [notes, setNotes] = useState(existing?.notes ?? "");
-  const [payerMode, setPayerMode] = useState<PayerMode>(existing && existing.payers.length > 1 ? "multiple" : "single");
-  const [singlePayer, setSinglePayer] = useState<string | null>(existing?.payers[0]?.personId ?? (meId && group?.memberIds.includes(meId) ? meId : members[0]?.id ?? null));
+  const [payerMode, setPayerMode] = useState<PayerMode>(existing && (existing.payers?.length ?? 0) > 1 ? "multiple" : "single");
+  const [singlePayer, setSinglePayer] = useState<string | null>(existing?.payers?.[0]?.personId ?? (meId && (group?.memberIds ?? []).includes(meId) ? meId : members[0]?.id ?? null));
   const [multiPayers, setMultiPayers] = useState<Record<string, string>>(() =>
-    existing ? Object.fromEntries(existing.payers.map((p) => [p.personId, formatPlain(p.amountMinor, existing.currency)])) : {}
+    existing ? Object.fromEntries((existing.payers ?? []).map((p) => [p.personId, formatPlain(p.amountMinor, existing.currency)])) : {}
   );
   const [splitMethod, setSplitMethod] = useState<SplitMethod>(existing?.splitMethod ?? "equal");
-  const [participants, setParticipants] = useState<string[]>(existing ? existing.splits.map((s) => s.personId) : group?.memberIds ?? []);
+  const [participants, setParticipants] = useState<string[]>(existing ? (existing.splits ?? []).map((s) => s.personId) : group?.memberIds ?? []);
   const [values, setValues] = useState<Record<string, string>>(() => {
     if (!existing) return {};
     const out: Record<string, string> = {};
-    for (const s of existing.splits) {
+    for (const s of existing.splits ?? []) {
       if (existing.splitMethod === "percentage") out[s.personId] = String(s.percent ?? 0);
       else if (existing.splitMethod === "shares") out[s.personId] = String(s.shares ?? 0);
       else if (existing.splitMethod === "exact") out[s.personId] = formatPlain(s.amountMinor, existing.currency);

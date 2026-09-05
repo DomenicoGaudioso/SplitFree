@@ -45,8 +45,8 @@ export default function ExpenseDetailScreen() {
   const icon = iconForExpense(expense.title, expense.categoryId);
   const foreign = expense.currency !== group.currency;
   const self = [...people.values()].find((p) => p.isSelf);
-  const mine = self ? expense.splits.find((s) => s.personId === self.id)?.amountMinor ?? 0 : 0;
-  const paidByMe = self ? expense.payers.find((p) => p.personId === self.id)?.amountMinor ?? 0 : 0;
+  const mine = self ? (expense.splits ?? []).find((s) => s.personId === self.id)?.amountMinor ?? 0 : 0;
+  const paidByMe = self ? (expense.payers ?? []).find((p) => p.personId === self.id)?.amountMinor ?? 0 : 0;
 
   const onDelete = async () => {
     const ok = await confirm("Eliminare la spesa?", `"${expense.title}" e i suoi ${attachments.length} allegati verranno eliminati.`, { confirmText: "Elimina", destructive: true });
@@ -113,19 +113,19 @@ export default function ExpenseDetailScreen() {
 
       <SectionHeader title="Pagato da" />
       <Card padded={false}>
-        {expense.payers.map((p, i) => {
+        {(expense.payers ?? []).map((p, i) => {
           const person = people.get(p.personId);
-          return <ListRow key={p.personId} leading={<Avatar person={person} size={36} />} title={person?.isSelf ? `${person.name} (tu)` : person?.name ?? "?"} trailing={<Money minor={p.amountMinor} currency={expense.currency} />} last={i === expense.payers.length - 1} />;
+          return <ListRow key={p.personId} leading={<Avatar person={person} size={36} />} title={person?.isSelf ? `${person.name} (tu)` : person?.name ?? "Persona rimossa"} trailing={<Money minor={p.amountMinor} currency={expense.currency} />} last={i === (expense.payers ?? []).length - 1} />;
         })}
       </Card>
 
-      <SectionHeader title={`Diviso ${METHOD_LABEL[expense.splitMethod]}`} />
+      <SectionHeader title={`Diviso ${METHOD_LABEL[expense.splitMethod] ?? "in parti uguali"}`} />
       <Card padded={false}>
-        {expense.splits.map((s, i) => {
+        {(expense.splits ?? []).map((s, i) => {
           const person = people.get(s.personId);
           const detail = s.percent !== undefined ? `${s.percent}%` : s.shares !== undefined ? `${s.shares} ${s.shares === 1 ? "quota" : "quote"}` : undefined;
           return (
-            <ListRow key={s.personId} leading={<Avatar person={person} size={36} />} title={person?.isSelf ? `${person.name} (tu)` : person?.name ?? "?"} subtitle={detail} trailing={<Money minor={s.amountMinor} currency={expense.currency} />} last={i === expense.splits.length - 1} />
+            <ListRow key={s.personId} leading={<Avatar person={person} size={36} />} title={person?.isSelf ? `${person.name} (tu)` : person?.name ?? "Persona rimossa"} subtitle={detail} trailing={<Money minor={s.amountMinor} currency={expense.currency} />} last={i === (expense.splits ?? []).length - 1} />
           );
         })}
       </Card>

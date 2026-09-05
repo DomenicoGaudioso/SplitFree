@@ -61,15 +61,18 @@ export function monthKey(iso: string): string {
   return iso.slice(0, 7);
 }
 
-/** Etichetta breve del mese: "mar 26". */
+/** Etichetta breve del mese: "mar 26". Chiave malformata → restituita com'è (mai crash). */
 export function monthLabel(key: string): string {
   const [y, m] = key.split("-").map(Number);
-  return `${MONTHS_SHORT[m - 1]} ${String(y).slice(2)}`;
+  const name = MONTHS_SHORT[m - 1];
+  if (!name || !Number.isFinite(y)) return key;
+  return `${name} ${String(y).slice(2)}`;
 }
 
 export function monthLabelLong(key: string): string {
   const [y, m] = key.split("-").map(Number);
   const name = MONTHS_LONG[m - 1];
+  if (!name || !Number.isFinite(y)) return key || "—";
   return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${y}`;
 }
 

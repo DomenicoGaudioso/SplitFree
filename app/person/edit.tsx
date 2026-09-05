@@ -54,13 +54,23 @@ export default function PersonEditScreen() {
 
   const onDelete = async () => {
     if (!existing) return;
-    const ok = await confirm("Eliminare la persona?", `${existing.name} verrà rimossa da tutti i gruppi.`, { confirmText: "Elimina", destructive: true });
+    const ok = await confirm(
+      "Eliminare la persona?",
+      `${existing.name} verrà rimossa da tutti i gruppi. Le sue quote e i suoi pagamenti nelle spese saranno ripartiti proporzionalmente sugli altri partecipanti; i rimborsi che la coinvolgono verranno eliminati.`,
+      { confirmText: "Elimina", destructive: true }
+    );
     if (!ok) return;
     const res = deletePerson(existing.id);
     if (!res.ok) {
       notify("Non eliminabile", res.reason);
       return;
     }
+    const parts = [
+      res.updatedExpenses > 0 ? `${res.updatedExpenses} ${res.updatedExpenses === 1 ? "spesa ripartita" : "spese ripartite"} sui rimanenti` : null,
+      res.removedExpenses > 0 ? `${res.removedExpenses} ${res.removedExpenses === 1 ? "spesa rimossa" : "spese rimosse"}` : null,
+      res.removedSettlements > 0 ? `${res.removedSettlements} ${res.removedSettlements === 1 ? "rimborso rimosso" : "rimborsi rimossi"}` : null,
+    ].filter(Boolean);
+    notify("Persona eliminata", `${existing.name} eliminata${parts.length > 0 ? `: ${parts.join(", ")}` : ""}.`);
     router.back();
   };
 
@@ -111,7 +121,7 @@ export default function PersonEditScreen() {
               <Button title="Elimina" icon="trash-outline" variant="danger" onPress={onDelete} />
             </View>
             <Text style={{ color: t.textFaint, fontSize: font.tiny, marginTop: spacing.md }}>
-              Archiviare nasconde la persona dalle nuove spese senza toccare lo storico. Eliminare è possibile solo se non compare in spese o rimborsi.
+              Archiviare nasconde la persona dalle nuove spese senza toccare lo storico. Eliminare ripartisce le sue quote sugli altri membri e rimuove i rimborsi che la coinvolgono.
             </Text>
           </Card>
         </>

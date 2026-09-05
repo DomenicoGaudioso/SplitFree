@@ -22,13 +22,13 @@ export function ExpenseRow({ expense, people, selfId, groupName, onPress, last }
   const t = useTheme();
   const cat = categoryById(expense.categoryId);
   const icon = iconForExpense(expense.title, expense.categoryId);
-  const payerNames = expense.payers
-    .map((p) => people.get(p.personId)?.name ?? "?")
+  const payerNames = (expense.payers ?? [])
+    .map((p) => people.get(p.personId)?.name ?? "Persona rimossa")
     .map((n, i, arr) => (arr.length > 1 && n.length > 10 ? `${n.slice(0, 9)}…` : n));
   const payerLabel =
     payerNames.length === 0 ? "" : payerNames.length <= 2 ? payerNames.join(" e ") : `${payerNames[0]} +${payerNames.length - 1}`;
-  const mine = selfId ? expense.splits.find((s) => s.personId === selfId) : undefined;
-  const paidByMe = selfId ? expense.payers.find((p) => p.personId === selfId)?.amountMinor ?? 0 : 0;
+  const mine = selfId ? (expense.splits ?? []).find((s) => s.personId === selfId) : undefined;
+  const paidByMe = selfId ? (expense.payers ?? []).find((p) => p.personId === selfId)?.amountMinor ?? 0 : 0;
   const myNet = paidByMe - (mine?.amountMinor ?? 0);
   const subtitleParts = [relativeDateLabel(expense.date)];
   if (groupName) subtitleParts.push(groupName);
