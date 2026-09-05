@@ -1,14 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
+import { File as FsFile } from "expo-file-system";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { cloudDeleteGroupEntirely, cloudLeaveGroup } from "@/cloud/cloudGroup";
 import { shareGroupOneClick } from "@/cloud/oneClickShare";
+import { shareGroupViaFile } from "@/cloud/fileShare/share";
+import { pullSharedGroup, useFileShareSyncStatus } from "@/cloud/fileShare/sync";
 import { formatIsoDate, monthKey, monthLabelLong } from "@/domain/dates";
 import { formatMinor } from "@/domain/money";
+import { parseSplitwiseCsv } from "@/domain/splitwiseImport";
+import type { FileShareProvider } from "@/domain/types";
 import { useGroupActions } from "@/store/groupActions";
 import { useGroupFinance, useResolvedGroup, useSelf, useSyncCloudPointer } from "@/store/selectors";
 import { useStore } from "@/store/store";
+import { TelegramShareWizard } from "@/ui/components/TelegramShareWizard";
 import {
   Avatar,
   AvatarStack,
@@ -30,8 +37,15 @@ import { confirm, notify } from "@/ui/dialogs";
 import { font, spacing, useTheme } from "@/ui/theme";
 
 type Tab = "expenses" | "balances" | "settlements";
-type LocalMenuAction = "share" | "edit" | "archive" | "delete";
+type LocalMenuAction = "share" | "shareFile" | "importCsv" | "edit" | "archive" | "delete";
 type CloudMenuAction = "invite" | "leave" | "deleteAll";
+
+/** "2026-09-04T08:53:58.334Z" -> "08:53" (ora locale). */
+function formatSyncTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
 export default function GroupDetailScreen() {
   const { id, tab: initialTab } = useLocalSearchParams<{ id: string; tab?: Tab }>();
@@ -46,13 +60,24 @@ export default function GroupDetailScreen() {
   const deleteSettlement = useStore((s) => s.deleteSettlement);
   const deleteLocalPointer = useStore((s) => s.deleteGroup);
   const upsertCloudGroupPointer = useStore((s) => s.upsertCloudGroupPointer);
+  const importSplitwiseRows = useStore((s) => s.importSplitwiseRows);
   const [tab, setTab] = useState<Tab>(initialTab ?? "expenses");
   const [menu, setMenu] = useState(false);
+  const [providerPicker, setProviderPicker] = useState(false);
+  const [telegramWizard, setTelegramWizard] = useState(false);
   const [simplified, setSimplified] = useState(true);
   const [busyMenu, setBusyMenu] = useState(false);
   const [sharing, setSharing] = useState(false);
 
   const isCloud = !!group?.cloud;
+  const isFileShare = !isCloud && !!group?.fileShare;
+  const fileShareFileId = group?.fileShare?.fileId ?? null;
+  const syncStatus = useFileShareSyncStatus(isFileShare ? id : undefined);
+
+  // Gruppo condiviso via file: all'apertura scarica e fonde lo stato remoto.
+  useEffect(() => {
+    if (id && fileShareFileId) void pullSharedGroup(id);
+  }, [id, fileShareFileId]);
   const members = useMemo(() => (group ? group.memberIds.map((m) => people.get(m)).filter((p): p is NonNullable<typeof p> => !!p) : []), [group, people]);
   const meId = isCloud ? authUser?.uid : self?.id;
   const myBalance = meId ? finance.balances.find((b) => b.personId === meId)?.netMinor ?? 0 : 0;
@@ -118,9 +143,85 @@ export default function GroupDetailScreen() {
     }
   };
 
+  const handleFileShare = async (provider: FileShareProvider) => {
+    // Telegram: il percorso consigliato è guidato dal wizard (bot → gruppo → condivisione).
+    if (provider === "telegram") {
+      setTelegramWizard(true);
+      return;
+    }
+    setSharing(true);
+    try {
+      const res = await shareGroupViaFile({
+        group,
+        people: Array.from(people.values()),
+        expenses,
+        settlements,
+        self,
+        provider,
+        onLinked: (updated) => {
+          upsertCloudGroupPointer(updated);
+        },
+      });
+      if (!res.ok) {
+        notify("Condivisione non riuscita", res.error || "Si è verificato un errore");
+      } else if (Platform.OS === "web") {
+        notify("Link copiato!", "Il link di invito è pronto e copiato negli appunti. Invialo ai partecipanti.");
+      }
+    } catch (err) {
+      notify("Errore", String(err));
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleImportSplitwise = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ["text/csv", "text/comma-separated-values", "text/plain"],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const asset = res.assets[0];
+      let text: string;
+      if (Platform.OS === "web") {
+        text = asset.file ? await asset.file.text() : await (await fetch(asset.uri)).text();
+      } else {
+        text = await new FsFile(asset.uri).text();
+      }
+      const parsed = parseSplitwiseCsv(text);
+      if (!parsed.ok) {
+        notify("Import non riuscito", parsed.error);
+        return;
+      }
+      if (parsed.rows.length === 0) {
+        notify("Nessuna spesa trovata", "Il CSV non contiene righe di spesa valide da importare.");
+        return;
+      }
+      const result = importSplitwiseRows(group.id, parsed.rows);
+      const extra = [
+        result.peopleCreated > 0 ? `${result.peopleCreated} ${result.peopleCreated === 1 ? "persona creata" : "persone create"}` : null,
+        parsed.skipped > 0 ? `${parsed.skipped} ${parsed.skipped === 1 ? "riga saltata" : "righe saltate"}` : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      notify("Import completato", `${result.added} ${result.added === 1 ? "spesa importata" : "spese importate"}${extra ? ` (${extra})` : ""}.`);
+    } catch (err) {
+      notify("Import non riuscito", String(err));
+    }
+  };
+
   const onLocalMenu = async (action: LocalMenuAction) => {
     if (action === "share") {
       void handleOneClickShare();
+      return;
+    }
+    if (action === "shareFile") {
+      setProviderPicker(true);
+      return;
+    }
+    if (action === "importCsv") {
+      void handleImportSplitwise();
       return;
     }
     if (action === "edit") router.push({ pathname: "/group/edit", params: { id: group.id } });
@@ -207,8 +308,14 @@ export default function GroupDetailScreen() {
                   {group.name}
                 </Text>
                 {isCloud ? <Tag label="condiviso" color={t.primary} /> : null}
+                {isFileShare ? <Tag label="via file" color={t.primary} /> : null}
               </View>
               {group.description ? <Text style={{ color: t.textMuted, fontSize: font.small }}>{group.description}</Text> : null}
+              {isFileShare && group.fileShare?.lastSyncedAt ? (
+                <Text style={{ color: t.textFaint, fontSize: font.tiny, marginTop: 2 }}>
+                  Aggiornato: {formatSyncTime(group.fileShare.lastSyncedAt)}
+                </Text>
+              ) : null}
               <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <AvatarStack people={members} size={24} max={6} />
                 <Text style={{ color: t.textMuted, fontSize: font.small }}>
@@ -219,12 +326,12 @@ export default function GroupDetailScreen() {
           </View>
           <View style={{ marginTop: spacing.md, flexDirection: "row", gap: spacing.sm, alignItems: "center" }}>
             <Button
-              title={isCloud ? "Invita (1 click)" : "Condividi nel cloud (1 click)"}
-              icon={isCloud ? "share-social-outline" : "cloud-upload-outline"}
+              title={isCloud ? "Invita (1 click)" : isFileShare ? "Invita (link file)" : "Condividi nel cloud (1 click)"}
+              icon={isCloud || isFileShare ? "share-social-outline" : "cloud-upload-outline"}
               size="sm"
-              variant={isCloud ? "secondary" : "primary"}
+              variant={isCloud || isFileShare ? "secondary" : "primary"}
               loading={sharing}
-              onPress={() => void handleOneClickShare()}
+              onPress={() => (isFileShare ? void handleFileShare(group.fileShare!.provider) : void handleOneClickShare())}
               style={{ flex: 1 }}
             />
             {isCloud ? (
@@ -252,6 +359,21 @@ export default function GroupDetailScreen() {
             </View>
           </View>
         </Card>
+
+        {isFileShare && syncStatus?.readOnly ? (
+          <Card>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+              <Ionicons name="lock-closed-outline" size={18} color={t.negative} />
+              <Text style={{ color: t.negative, fontSize: font.small, flex: 1, lineHeight: 18 }}>
+                {group.fileShare?.provider === "webdav"
+                  ? "Accesso in sola lettura: credenziali WebDAV mancanti. Collega il server dalle Impostazioni o chiedi un nuovo invito."
+                  : group.fileShare?.provider === "telegram"
+                    ? "Accesso in sola lettura: credenziali Telegram mancanti. Configura il bot nelle Impostazioni → Notifiche Telegram o chiedi un nuovo invito."
+                    : `Accesso in sola lettura: collega il tuo account ${group.fileShare?.provider === "onedrive" ? "OneDrive" : "Google Drive"} dalle Impostazioni per modificare.`}
+              </Text>
+            </View>
+          </Card>
+        ) : null}
 
         <Segmented<Tab>
           options={[
@@ -425,7 +547,9 @@ export default function GroupDetailScreen() {
           visible={menu}
           title={group.name}
           items={[
-            { value: "share", label: "Condividi nel cloud (1 click)", subtitle: "Sincronizza in tempo reale e invita", leading: <Ionicons name="cloud-upload-outline" size={22} color={t.primary} /> },
+            { value: "shareFile", label: "Condividi via file cloud", subtitle: "Un file JSON su Telegram (consigliato) o sul tuo WebDAV/Drive/OneDrive", leading: <Ionicons name="document-outline" size={22} color={t.primary} /> },
+            { value: "share", label: "Condividi via Firebase (legacy)", subtitle: "Sincronizza in tempo reale e invita", leading: <Ionicons name="cloud-upload-outline" size={22} color={t.text} /> },
+            { value: "importCsv", label: "Importa CSV da Splitwise", subtitle: "Carica le spese da un export .csv", leading: <Ionicons name="download-outline" size={22} color={t.text} /> },
             { value: "edit", label: "Modifica gruppo", subtitle: "Nome, valuta, membri", leading: <Ionicons name="create-outline" size={22} color={t.text} /> },
             { value: "archive", label: group.archivedAt ? "Ripristina" : "Archivia", subtitle: "Nascondi dalla lista principale", leading: <Ionicons name="archive-outline" size={22} color={t.text} /> },
             { value: "delete", label: "Elimina gruppo", subtitle: "Cancella spese e rimborsi", leading: <Ionicons name="trash-outline" size={22} color={t.negative} /> },
@@ -434,6 +558,28 @@ export default function GroupDetailScreen() {
           onClose={() => setMenu(false)}
         />
       )}
+      <PickerSheet<FileShareProvider>
+        visible={providerPicker}
+        title="Condividi via file"
+        items={[
+          { value: "telegram", label: "Telegram (consigliato)", subtitle: "Wizard guidato: il file vive in un gruppo Telegram dedicato, nessuna registrazione", leading: <Ionicons name="paper-plane-outline" size={22} color={t.primary} /> },
+          { value: "webdav", label: "WebDAV", subtitle: "File sul tuo server (pCloud, Koofr, Nextcloud)", leading: <Ionicons name="server-outline" size={22} color={t.text} /> },
+          { value: "gdrive", label: "Google Drive", subtitle: "Solo tu (amministratore) puoi modificare il file", leading: <Ionicons name="logo-google" size={22} color={t.text} /> },
+          { value: "onedrive", label: "OneDrive", subtitle: "Permette a tutti di modificare", leading: <Ionicons name="logo-microsoft" size={22} color={t.text} /> },
+        ]}
+        onSelect={(p) => void handleFileShare(p)}
+        onClose={() => setProviderPicker(false)}
+      />
+      <TelegramShareWizard
+        visible={telegramWizard}
+        group={group}
+        people={Array.from(people.values())}
+        expenses={expenses}
+        settlements={settlements}
+        self={self}
+        onLinked={(updated) => upsertCloudGroupPointer(updated)}
+        onClose={() => setTelegramWizard(false)}
+      />
       {busyMenu ? (
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.05)" }]} />
       ) : null}

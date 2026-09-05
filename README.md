@@ -1,10 +1,12 @@
 # SplitFree
 
-App per dividere le spese in stile Splitwise: **gratuita, open source, senza pubblicità**. Un gruppo può restare **solo locale** (tutto sul dispositivo, come sempre) oppure diventare **condiviso**: allora si sincronizza in tempo reale con le altre persone tramite un progetto Firebase gratuito collegato da chi lo amministra. Funziona su **Android** (APK) e su **Mac** (app desktop), con lo stesso codice.
+App per dividere le spese in stile Splitwise: **gratuita, open source, senza pubblicità**. Al primo avvio colleghi il tuo cloud — **WebDAV (pCloud, Koofr, Nextcloud: consigliato, nessuna registrazione)** oppure Google Drive/OneDrive: i dati dell'app vivono in un file JSON sul *tuo* cloud (nessun server di SplitFree) e il dispositivo tiene solo una cache locale che funziona offline. In più, un gruppo può diventare **condiviso** e sincronizzarsi con le altre persone tramite un file JSON sul cloud dell'amministratore. Funziona su **Android** (APK) e su **Mac** (app desktop), con lo stesso codice.
 
 ## Funzionalità
 
-- **Gruppi locali o condivisi**: un gruppo locale resta solo sul telefono, come sempre; uno condiviso vive in tempo reale su Firestore e si invita altra gente con un link (vedi [Gruppi condivisi](#gruppi-condivisi-in-tempo-reale) sotto).
+- **I tuoi dati nel tuo cloud**: all'apertura colleghi un server WebDAV (pCloud, Koofr, Nextcloud…) oppure Google Drive/OneDrive (onboarding obbligatorio) e i dati si sincronizzano da soli sul file `splitfree_data.json` del tuo account. Si può anche continuare senza account, con i dati solo sul dispositivo (vedi [I tuoi dati nel tuo cloud](#i-tuoi-dati-nel-tuo-cloud) sotto).
+- **Offline di serie**: lo store locale è una cache completa: l'app funziona senza rete e carica le modifiche sul cloud appena torni online.
+- **Gruppi locali o condivisi**: un gruppo locale resta solo sul telefono, come sempre; uno condiviso via file vive in un JSON su Telegram (consigliato), WebDAV, Google Drive o OneDrive (vedi [Condividere un gruppo via file](#condividere-un-gruppo-via-file) sotto); il percorso legacy su Firestore resta disponibile (vedi [Gruppi condivisi](#gruppi-condivisi-in-tempo-reale) sotto).
 - **Persone locali**: nei gruppi locali sono schede sul dispositivo, non serve che abbiano l'app.
 - **Spese con icona automatica**: l'icona (e la categoria) viene dedotta dal titolo. "Pizza da Gino" mostra una pizza, "Benzina" un'auto, "Hotel Bologna" un letto. Si può sempre cambiare a mano.
 - **Motore di divisione** con arrotondamento esatto al centesimo (metodo del massimo resto):
@@ -19,10 +21,11 @@ App per dividere le spese in stile Splitwise: **gratuita, open source, senza pub
 - **Multi‑valuta**: ogni spesa può avere una valuta diversa da quella del gruppo; il tasso viene scaricato da API pubbliche gratuite (open.er‑api.com, con riserva frankfurter.dev), messo in cache e riutilizzato offline, oppure inserito a mano.
 - **Statistiche**: andamento mensile (totale e quota personale), ripartizione per categoria e per persona, per gruppo o su tutti i gruppi.
 - **Allegati locali**: foto di ricevute (galleria o fotocamera) e PDF, copiati a piena risoluzione nella memoria privata dell'app.
-- **Backup**: esportazione e importazione di un file JSON per spostare i dati fra dispositivi.
+- **Backup manuale**: esportazione e importazione di un file JSON per spostare i dati fra dispositivi (distinto dalla sincronizzazione automatica sul cloud).
 - **Tema chiaro/scuro**, interfaccia in italiano.
 - **Navigazione in alto**, non in basso: sul telefono i pulsanti di sistema (Android) o l'indicatore gesture (iOS) stanno già in fondo allo schermo. Si passa da una sezione all'altra toccando la barra in alto oppure trascinando il dito a destra o sinistra sul contenuto.
 - **Email per ogni persona**: aggiungendo qualcuno a un gruppo (o dalla scheda Persone) va indicata anche la sua email.
+- **Notifiche Telegram**: un messaggio sul gruppo Telegram dei partecipanti ogni volta che qualcuno aggiunge una spesa o un rimborso (vedi [Notifiche Telegram](#notifiche-telegram) sotto).
 
 ## Download
 
@@ -39,13 +42,46 @@ Ogni tag `v*` pubblicato sul repo fa partire la build e crea la release con i fi
 |---|---|
 | UI | React Native + Expo SDK 57, TypeScript strict, Expo Router |
 | Stato | Zustand, con salvataggio automatico dopo ogni modifica |
-| Dati locali | File JSON nella cartella privata dell'app (Android); localStorage + IndexedDB (web/Mac) |
+| Dati locali | File JSON nella cartella privata dell'app (Android); localStorage + IndexedDB (web/Mac) — cache offline |
+| Dati cloud personale | `splitfree_data.json` su WebDAV (Basic auth) o Google Drive / OneDrive (OAuth2 + PKCE con refresh token) |
 | Dati condivisi | Firestore + Firebase Auth, un progetto per amministratore (nessun backend gestito da SplitFree) |
 | Motore finanziario | `src/domain/` puro TypeScript, testato con Vitest |
 | Grafici | react-native-svg (nessuna libreria di charting) |
 | Desktop | Electron che incapsula la build web statica |
 
 Tutti gli importi sono interi in unità minori (centesimi): niente errori in virgola mobile.
+
+## I tuoi dati nel tuo cloud
+
+Al primo avvio l'app chiede di collegare un cloud (onboarding obbligatorio). Da quel momento:
+
+- l'intero archivio (persone, gruppi, spese, rimborsi, impostazioni) è salvato automaticamente nel file **`splitfree_data.json`** sul tuo cloud, ad ogni modifica (debounce di 5s);
+- all'apertura, se il file sul cloud è più recente della copia locale, i dati vengono scaricati e sostituiti — così ritrovi tutto su ogni dispositivo;
+- **offline** l'app funziona lo stesso: lo store locale è una cache completa e sincronizza appena torna la rete.
+
+Chi preferisce non collegare nulla può toccare **"Continua senza account"**: i dati restano solo sul dispositivo, come prima.
+
+### WebDAV (consigliato): pCloud, Koofr, Nextcloud
+
+La via più semplice: **nessuna registrazione sviluppatore**, bastano username e password del tuo server WebDAV. Nell'onboarding tocca **"Continua con pCloud / WebDAV"**, scegli il preset (o inserisci l'URL a mano) e verifica la connessione.
+
+- **Preset pronti**: pCloud → `https://ewebdav.pcloud.com` · Koofr → `https://app.koofr.net/dav` · Nextcloud → `https://<server>/remote.php/dav/files/<utente>`.
+- **App-password consigliata**: pCloud, Koofr e Nextcloud permettono di generare password dedicate per singola app. Usane una invece della password principale: le credenziali WebDAV finiscono nei link di invito dei gruppi condivisi.
+- Il file `splitfree_data.json` vive nella cartella **`/SplitFree`** del server, creata automaticamente al primo collegamento.
+- Si gestisce tutto da **Impostazioni → Cloud WebDAV**: verifica della connessione, cambio credenziali, disconnessione.
+
+### Google Drive / OneDrive (opzioni avanzate)
+
+Restano disponibili come provider alternativi, ma il login OAuth richiede **una registrazione sviluppatore** (Client ID) configurata in fase di build: vedi sotto. Il login usa OAuth2 con **Authorization Code + PKCE e refresh token** (accesso "completo", si rinnova da solo). Eccezione: su web Google non accetta lo scambio del code senza client secret per i client "Web", quindi lì la sessione Google dura ~1h e va riconnessa dalle Impostazioni.
+
+### Configurare i Client ID (una tantum, per chi compila l'app)
+
+I Client ID OAuth integrati sono segnaposto: per la connessione reale servono applicazioni registrate da te.
+
+- **Google Drive**: su [console.cloud.google.com](https://console.cloud.google.com) crea un progetto, abilita la **Google Drive API**, poi in Credenziali crea un **Client ID OAuth** (tipo "Web application" per la build web/desktop, con redirect URI `splitfree://` e l'origine della build; per Android crea anche un client Android). Imposta la variabile `EXPO_PUBLIC_GOOGLE_CLIENT_ID` in fase di build, oppure incolla l'ID in Impostazioni → Account & Cloud Storage → Opzioni avanzate.
+- **OneDrive**: su [portal.azure.com](https://portal.azure.com) → Microsoft Entra ID → App registrations → New registration (tipo "Account in qualsiasi directory organizzativa e account Microsoft personali"), piattaforma "Public client/native" con redirect URI `splitfree://`. Imposta `EXPO_PUBLIC_MICROSOFT_CLIENT_ID` oppure incolla l'Application (client) ID nelle Impostazioni.
+
+Il file `splitfree_backup.json` delle versioni precedenti resta disponibile come **backup manuale** (Salva/Ripristina nelle Impostazioni), indipendente dalla sincronizzazione automatica.
 
 ## Gruppi condivisi (in tempo reale)
 
@@ -86,16 +122,67 @@ Le regole (`firestore.rules`) fanno rispettare: solo l'amministratore crea/elimi
 - Home e la lista Gruppi mostrano nome/persone dei gruppi condivisi con gli ultimi dati visti (si aggiornano aprendo il dettaglio del gruppo); i bilanci "in tempo reale" veri sono nella schermata di dettaglio.
 - L'eliminazione totale di un gruppo condiviso cancella le sue sottocollezioni una per una (Firestore non supporta l'eliminazione ricorsiva lato client in un'unica operazione atomica): in rari casi di connessione interrotta a metà può restare qualche documento orfano.
 
+## Condividere un gruppo via file
+
+Alternativa alla condivisione Firebase (legacy): il gruppo vive in un file **`splitfree_group_<id>.json`** — su **Telegram (consigliato)**, WebDAV, Google Drive o OneDrive — nessun progetto Firebase da configurare, nessun server di SplitFree. Dal menu del gruppo: **Condividi via file** → scegli il provider → l'app carica il file e apre il foglio di condivisione con l'invito (`splitfree://join?...`).
+
+- **Il link è il segreto**: chiunque abbia il link di invito può leggere il gruppo. Non pubblicarlo dove non vuoi estranei. Con Telegram il link contiene il **token del bot**, con WebDAV le **credenziali del server**: chi ce l'ha può leggere E scrivere. (Per WebDAV usa sempre una app-password dedicata, mai la password principale dell'account.)
+- **Telegram** *(consigliato)*: il file del gruppo è un **documento pinnato** in un gruppo Telegram, letto e scritto via Bot API con il solo bot token — nessuna registrazione, nessun OAuth, e le notifiche delle spese arrivano nello stesso posto. Vedi [Condividere via Telegram](#condividere-via-telegram-consigliato) sotto.
+- **WebDAV**: ogni membro può aggiungere spese e rimborsi appena entra — le credenziali viaggiano nel link, nessun account da collegare. La scrittura passa dal file sul server dell'amministratore con merge last-write-wins.
+- **Lettura anonima** (solo Drive/OneDrive): chi riceve l'invito entra e legge senza nessun account (Drive: download diretto del file pubblico; OneDrive: shares API sul link di condivisione).
+- **Scrittura con Drive/OneDrive**:
+  - **Google Drive**: il file lo modifica solo l'amministratore dal proprio account; gli altri membri leggono e basta (banner "Accesso in sola lettura" nel gruppo).
+  - **OneDrive**: ogni membro che collega il proprio account Microsoft dalle Impostazioni può aggiungere spese e rimborsi; la scrittura passa dal file dell'amministratore con merge last-write-wins.
+- **Sincronizzazione**: lo store locale è la cache offline. Ogni modifica locale viene caricata sul file con un debounce di 3s (pull → merge → upload, con un retry su conflitto); all'apertura del gruppo l'app scarica e fonde lo stato remoto. Le eliminazioni viaggiano via tombstone (ricordate 30 giorni).
+- Gli **allegati** restano locali anche qui, come nei gruppi Firebase.
+
+## Condividere via Telegram (consigliato)
+
+Il percorso più semplice per condividere un gruppo: il file JSON del gruppo è un **documento pinnato** in un gruppo Telegram dedicato e le app lo leggono/scrivono via **Bot API** con il solo bot token. Niente registrazioni sviluppatore, niente OAuth, niente server di SplitFree — e le [notifiche delle spese](#notifiche-telegram) arrivano nella stessa chat.
+
+### Il wizard guidato (niente chat ID da cercare a mano)
+
+Nel gruppo SplitFree: menu **⋯ → Condividi via file → Telegram (consigliato)**. Si apre un wizard in 3 passi:
+
+1. **Il tuo bot**: se non ce l'hai, il wizard apre **@BotFather** (`/newbot` → copia il token); incolli il token e l'app lo verifica. Se l'hai già configurato nelle Impostazioni, questo passo si salta da solo.
+2. **Il gruppo Telegram**: il bottone **"Crea il gruppo Telegram col bot"** apre Telegram sul selettore "aggiungi a un gruppo" (i bot non possono creare gruppi da soli): crei un gruppo NUOVO col bot dentro, aggiungi i partecipanti e torni in SplitFree — l'app rileva da sé la chat via `getUpdates` (long polling, ~2 minuti di attesa, annullabile).
+3. **Condivisione**: automatica. L'app pubblica il documento pinnato, crea il link d'invito Telegram al gruppo e apre il foglio di condivisione con l'invito SplitFree (che include anche il link Telegram, così chi si unisce entra anche nella chat delle notifiche).
+
+La vecchia via manuale (cercare la Chat ID con @userinfobot o `getUpdates` e incollarla in **Impostazioni → Notifiche Telegram**) resta disponibile come fallback e per le sole notifiche.
+
+### Come funziona
+
+- **Il file è un documento pinnato**: a ogni modifica l'app invia una nuova versione con `sendDocument` (caption `SplitFree · revisione N`) e la pinna silenziosamente. Le vecchie versioni restano nella chat come storico: è una feature.
+- **Il link di invito è il segreto del gruppo**: contiene il bot token, quindi chi ce l'ha può leggere e scrivere. Condividilo solo coi partecipanti.
+- **Chi si unisce** non configura nulla: apre il link, l'app legge il documento pinnato e può subito aggiungere spese; se l'invito porta anche il link Telegram, compare il bottone per entrare nel gruppo Telegram delle notifiche. Il messageId della versione corrente si scopre dal pin, non serve nell'invito.
+- **Corse fra dispositivi**: vale il ciclo pull → merge → push con merge last-write-wins; se due membri pubblicano nello stesso istante, vince l'ultimo pin.
+
+## Notifiche Telegram
+
+Si può ricevere un messaggio su Telegram ogni volta che qualcuno aggiunge una spesa o un rimborso in un gruppo. Non serve nessun server: è l'app stessa a chiamare la Bot API di Telegram dal dispositivo di chi esegue l'azione, con un **bot creato da te**.
+
+### Setup (una volta sola)
+
+1. Apri Telegram e scrivi a **@BotFather** → comando `/newbot` per creare il bot e copiare il **token**.
+2. Aggiungi il bot al gruppo Telegram dei partecipanti (o scrivigli in privato, se le notifiche le vuoi solo tu).
+3. Trova la **Chat ID**: scrivi a **@userinfobot**, oppure visita `https://api.telegram.org/bot<TOKEN>/getUpdates` dopo aver scritto un messaggio al bot (per i gruppi la Chat ID è negativa, es. `-1001234567890`).
+4. In SplitFree: **Impostazioni → Notifiche Telegram** → incolla token e Chat ID, premi **Invia messaggio di prova** per verificare, poi attiva le notifiche.
+
+Il token resta salvato solo sul dispositivo; ogni dispositivo che vuole inviare notifiche va configurato a sé (basta lo stesso bot e la stessa Chat ID).
+
 ## Struttura
 
 ```
 app/                 rotte Expo Router (schermate)
   (tabs)/            Home, Gruppi, Statistiche, Persone, Impostazioni
+  onboarding.tsx     collegamento obbligatorio del cloud all'avvio
   group/             dettaglio e editor gruppo
   expense/           editor e dettaglio spesa
   settle/            registrazione rimborso
   person/            editor persona
 src/domain/          modello, denaro, split, bilanci, semplificazione, categorie, statistiche
+src/cloud/           sync cloud personale (WebDAV/Drive/OneDrive), Firebase, Telegram, token OAuth
+src/cloud/fileShare/ condivisione gruppi via file JSON (documento, merge, provider HTTP, sync)
 src/store/           store Zustand, persistenza, allegati, tassi, backup
 src/ui/              tema e componenti riusabili
 tests/               test unitari del motore (Vitest)

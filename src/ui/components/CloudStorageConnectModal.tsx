@@ -10,8 +10,8 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { authenticateGoogleDrive } from "@/cloud/googleDriveSync";
-import { authenticateOneDrive } from "@/cloud/oneDriveSync";
+import { connectGoogleDriveAccount } from "@/cloud/googleDriveSync";
+import { connectOneDriveAccount } from "@/cloud/oneDriveSync";
 import { isPlaceholderClientId } from "@/cloud/defaultConfig";
 import { font, radius, spacing, useTheme } from "../theme";
 import { Button } from "./Button";
@@ -29,6 +29,9 @@ type Props = {
     name?: string;
     clientId?: string;
     accessToken?: string;
+    /** Presenti solo con il nuovo flusso auth-code + PKCE (accesso completo con rinnovo). */
+    refreshToken?: string | null;
+    expiresAt?: string | null;
   }) => void;
 };
 
@@ -105,20 +108,26 @@ export function CloudStorageConnectModal({
 
     setLoadingOAuth(true);
     try {
+      // Nuovo flusso auth-code + PKCE con refresh token (accesso completo);
+      // su web Google ricade internamente sul flusso implicit (accesso temporaneo).
       if (isGoogle) {
-        const res = await authenticateGoogleDrive(cleanClientId);
+        const res = await connectGoogleDriveAccount(cleanClientId);
         onConnect({
           email: res.email,
           name: res.name,
           accessToken: res.accessToken,
+          refreshToken: res.refreshToken,
+          expiresAt: res.expiresAt,
           clientId: cleanClientId,
         });
       } else {
-        const res = await authenticateOneDrive(cleanClientId);
+        const res = await connectOneDriveAccount(cleanClientId);
         onConnect({
           email: res.email,
           name: res.name,
           accessToken: res.accessToken,
+          refreshToken: res.refreshToken,
+          expiresAt: res.expiresAt,
           clientId: cleanClientId,
         });
       }

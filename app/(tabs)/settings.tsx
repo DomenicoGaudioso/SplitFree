@@ -4,14 +4,20 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { parseFirebaseConfigSnippet } from "@/cloud/configParse";
+import { sendTelegramMessage } from "@/cloud/telegram";
+import { getCachedBotUsername } from "@/cloud/fileShare/telegramSync";
 import {
+  connectGoogleDriveAccount,
   downloadBackupFromGoogleDrive,
   uploadBackupToGoogleDrive,
 } from "@/cloud/googleDriveSync";
 import {
+  connectOneDriveAccount,
   downloadBackupFromOneDrive,
   uploadBackupToOneDrive,
 } from "@/cloud/oneDriveSync";
+import { isPlaceholderClientId } from "@/cloud/defaultConfig";
+import { webdavTestConnection } from "@/cloud/fileShare/webdav";
 import { CURRENCIES } from "@/domain/money";
 import type { ThemePreference } from "@/domain/types";
 import { exportBackup, pickBackup } from "@/store/backup";
@@ -39,7 +45,9 @@ export default function SettingsScreen() {
   const settings = useStore((s) => s.data.settings);
   const data = useStore((s) => s.data);
   const updateSettings = useStore((s) => s.updateSettings);
+  const updateTelegramSettings = useStore((s) => s.updateTelegramSettings);
   const updateCloudStorage = useStore((s) => s.updateCloudStorage);
+  const updateWebdavSettings = useStore((s) => s.updateWebdavSettings);
   const replaceAll = useStore((s) => s.replaceAll);
   const resetAll = useStore((s) => s.resetAll);
   const addCloudProject = useStore((s) => s.addCloudProject);
@@ -56,9 +64,84 @@ export default function SettingsScreen() {
   const [projectLabel, setProjectLabel] = useState("");
   const [configText, setConfigText] = useState("");
   const [configError, setConfigError] = useState<string | null>(null);
+  const [telegramTestBusy, setTelegramTestBusy] = useState(false);
+  const [telegramBotUsername, setTelegramBotUsername] = useState<string | null>(null);
 
   const oneDrive = settings.cloudStorage?.oneDrive;
   const googleDrive = settings.cloudStorage?.googleDrive;
+  const webdav = settings.webdav;
+  const telegram = settings.telegram ?? { enabled: false, botToken: "", chatId: "" };
+
+  // Se c'è un token salvato, mostra l'username del bot (getMe lazy, con cache in memoria).
+  useEffect(() => {
+    const token = telegram.botToken.trim();
+    if (!token) {
+      setTelegramBotUsername(null);
+      return;
+    }
+    let cancelled = false;
+    getCachedBotUsername(token)
+      .then((u) => {
+        if (!cancelled) setTelegramBotUsername(u);
+      })
+      .catch(() => {
+        if (!cancelled) setTelegramBotUsername(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [telegram.botToken]);
+
+  const [webdavUrl, setWebdavUrl] = useState(webdav?.url ?? "");
+  const [webdavUser, setWebdavUser] = useState(webdav?.username ?? "");
+  const [webdavPassword, setWebdavPassword] = useState(webdav?.password ?? "");
+  const [webdavBusy, setWebdavBusy] = useState(false);
+
+  /** Verifica le credenziali inserite; se il server risponde, le salva come connessione attiva. */
+  const handleWebdavVerify = async () => {
+    setWebdavBusy(true);
+    try {
+      const cfg = { url: webdavUrl.trim(), username: webdavUser.trim(), password: webdavPassword };
+      const res = await webdavTestConnection(cfg);
+      if (res.ok) {
+        updateWebdavSettings({ ...cfg, connected: true });
+        notify("WebDAV connesso", "Il server ha risposto correttamente: i tuoi dati verranno sincronizzati qui.");
+      } else {
+        notify("Verifica non riuscita", res.error ?? "Errore sconosciuto.");
+      }
+    } finally {
+      setWebdavBusy(false);
+    }
+  };
+
+  const handleWebdavDisconnect = async () => {
+    const yes = await confirm(
+      "Disconnettere WebDAV?",
+      "I dati restano sul server, ma questo dispositivo non sincronizzerà più con WebDAV."
+    );
+    if (!yes) return;
+    updateWebdavSettings({ connected: false, lastSync: null });
+  };
+
+  const handleTelegramTest = async () => {
+    setTelegramTestBusy(true);
+    try {
+      // La prova forza enabled: si può testare la configurazione prima di attivarla.
+      const res = await sendTelegramMessage(
+        { ...telegram, enabled: true },
+        "✅ SplitFree: messaggio di prova. Le notifiche Telegram sono configurate correttamente."
+      );
+      if (res.ok) {
+        notify("Messaggio di prova inviato", "Controlla la chat Telegram: dovresti aver ricevuto il messaggio.");
+      } else if (res.error === "not-configured") {
+        notify("Configurazione incompleta", "Inserisci il token del bot e la Chat ID, poi riprova.");
+      } else {
+        notify("Invio fallito", res.error ?? "Errore sconosciuto.");
+      }
+    } finally {
+      setTelegramTestBusy(false);
+    }
+  };
 
   useEffect(() => {
     const self = data.people.find((p) => p.isSelf);
@@ -85,6 +168,8 @@ export default function SettingsScreen() {
     name?: string;
     clientId?: string;
     accessToken?: string;
+    refreshToken?: string | null;
+    expiresAt?: string | null;
   }) => {
     if (!storageModalService) return;
     const isOne = storageModalService === "oneDrive";
@@ -93,12 +178,55 @@ export default function SettingsScreen() {
       userEmail: account.email,
       userName: account.name || null,
       accessToken: account.accessToken || null,
+      refreshToken: account.refreshToken ?? null,
+      expiresAt: account.expiresAt ?? null,
+      clientId: account.clientId || null,
     });
     notify(
       isOne ? "Microsoft OneDrive collegato" : "Google Drive collegato",
       `Connesso con l'account ${account.email}`
     );
   };
+
+  /** Riconnetti: nuovo flusso OAuth con refresh token; senza client ID salvato apre il modal. */
+  const handleStorageReconnect = async (service: "oneDrive" | "googleDrive") => {
+    const existing = service === "oneDrive" ? oneDrive : googleDrive;
+    const storedClientId = existing?.clientId?.trim() || "";
+    if (!storedClientId || isPlaceholderClientId(storedClientId)) {
+      setStorageModalService(service);
+      return;
+    }
+    setCloudStorageBusy(service);
+    try {
+      const account =
+        service === "googleDrive"
+          ? await connectGoogleDriveAccount(storedClientId)
+          : await connectOneDriveAccount(storedClientId);
+      updateCloudStorage(service, {
+        connected: true,
+        userEmail: account.email,
+        userName: account.name,
+        accessToken: account.accessToken,
+        refreshToken: account.refreshToken,
+        expiresAt: account.expiresAt,
+        clientId: storedClientId,
+      });
+      notify(
+        service === "oneDrive" ? "OneDrive riconnesso" : "Google Drive riconnesso",
+        account.refreshToken
+          ? "Accesso completo: la sessione si rinnoverà da sola."
+          : "Accesso temporaneo (~1h): su web Google non rilascia il rinnovo automatico."
+      );
+    } catch (err) {
+      notify("Riconnessione non riuscita", String(err));
+    } finally {
+      setCloudStorageBusy(null);
+    }
+  };
+
+  /** Stato del token: "accesso completo" (refresh token) o "accesso temporaneo". */
+  const tokenStatusText = (service: { accessToken?: string | null; refreshToken?: string | null } | undefined) =>
+    service?.refreshToken ? "Accesso completo (rinnovo automatico)" : "Accesso temporaneo — riconnetti";
 
   // --- OneDrive Handlers ---
   const handleConnectOneDrive = () => {
@@ -175,7 +303,14 @@ export default function SettingsScreen() {
   };
 
   const handleDisconnectOneDrive = () => {
-    updateCloudStorage("oneDrive", { connected: false, accessToken: null, userEmail: null, userName: null });
+    updateCloudStorage("oneDrive", {
+      connected: false,
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+      userEmail: null,
+      userName: null,
+    });
     notify("OneDrive disconnesso");
   };
 
@@ -254,7 +389,14 @@ export default function SettingsScreen() {
   };
 
   const handleDisconnectGoogleDrive = () => {
-    updateCloudStorage("googleDrive", { connected: false, accessToken: null, userEmail: null, userName: null });
+    updateCloudStorage("googleDrive", {
+      connected: false,
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+      userEmail: null,
+      userName: null,
+    });
     notify("Google Drive disconnesso");
   };
 
@@ -346,12 +488,92 @@ export default function SettingsScreen() {
         />
       </Card>
 
-      {/* 2. Cloud Storage & Backup (Regola Studio #9) */}
-      <SectionHeader title="Account & Cloud Storage" />
+      {/* 2. Cloud WebDAV (consigliato) */}
+      <SectionHeader title="Cloud WebDAV (consigliato)" />
       <Card>
         <Text style={{ color: t.textMuted, fontSize: font.small, lineHeight: 20, marginBottom: spacing.md }}>
-          Collega il tuo account Microsoft o Google per salvare automaticamente i tuoi dati sul tuo cloud personale,
-          esportare i backup e ripristinarli su qualsiasi dispositivo in totale sicurezza.
+          pCloud, Koofr, Nextcloud o qualsiasi server WebDAV: basta username e password, nessuna registrazione
+          sviluppatore. I tuoi dati e i gruppi condivisi vivono in file JSON sul tuo server.
+        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing.sm }}>
+          <Text style={{ color: t.text, fontWeight: "800", fontSize: font.body, flex: 1 }}>Server WebDAV</Text>
+          <View
+            style={[
+              styles.statusPill,
+              { backgroundColor: webdav?.connected ? t.positiveSoft : t.surface },
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                { color: webdav?.connected ? t.positive : t.textFaint },
+              ]}
+            >
+              {webdav?.connected ? "Connesso" : "Non collegato"}
+            </Text>
+          </View>
+        </View>
+        {webdav?.connected && webdav.lastSync ? (
+          <Text style={{ color: t.textFaint, fontSize: 10, marginBottom: spacing.sm }}>
+            Ultima sincronizzazione: {formatLastSync(webdav.lastSync)}
+          </Text>
+        ) : null}
+        <TextField
+          label="Server"
+          value={webdavUrl}
+          onChangeText={setWebdavUrl}
+          placeholder="https://ewebdav.pcloud.com"
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          hint="Preset: pCloud https://ewebdav.pcloud.com · Koofr https://app.koofr.net/dav · Nextcloud https://<server>/remote.php/dav/files/<utente>"
+        />
+        <TextField
+          label="Email / username"
+          value={webdavUser}
+          onChangeText={setWebdavUser}
+          placeholder="tu@esempio.com"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <TextField
+          label="Password o app-password"
+          value={webdavPassword}
+          onChangeText={setWebdavPassword}
+          placeholder="••••••••"
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          hint="Consigliata una app-password dedicata: la condividi nei link di invito dei gruppi."
+        />
+        <View style={{ flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" }}>
+          <Button
+            title="Verifica connessione"
+            icon="checkmark-circle-outline"
+            variant="secondary"
+            size="sm"
+            onPress={() => void handleWebdavVerify()}
+            loading={webdavBusy}
+            disabled={!webdavUrl.trim() || !webdavUser.trim() || !webdavPassword}
+          />
+          {webdav?.connected ? (
+            <Button
+              title="Disconnetti"
+              variant="ghost"
+              size="sm"
+              onPress={() => void handleWebdavDisconnect()}
+            />
+          ) : null}
+        </View>
+      </Card>
+
+      {/* 3. Cloud Storage & Backup (Regola Studio #9) */}
+      <SectionHeader title="Account & Cloud Storage (avanzato)" />
+      <Card>
+        <Text style={{ color: t.textMuted, fontSize: font.small, lineHeight: 20, marginBottom: spacing.md }}>
+          Opzione avanzata: Google Drive e OneDrive richiedono una registrazione sviluppatore
+          (Client ID configurato in fase di build). Per iniziare subito usa WebDAV qui sopra.
+          Con l'account collegato puoi anche esportare i backup e ripristinarli su qualsiasi dispositivo.
         </Text>
 
         {/* Microsoft OneDrive Box */}
@@ -384,6 +606,18 @@ export default function SettingsScreen() {
                   {formatLastSync(oneDrive.lastSync)}
                 </Text>
               ) : null}
+              {oneDrive?.connected && oneDrive.accessToken ? (
+                <Text
+                  style={{
+                    color: oneDrive.refreshToken ? t.positive : t.negative,
+                    fontSize: 10,
+                    fontWeight: "700",
+                    marginTop: 2,
+                  }}
+                >
+                  {tokenStatusText(oneDrive)}
+                </Text>
+              ) : null}
             </View>
           </View>
 
@@ -399,6 +633,16 @@ export default function SettingsScreen() {
               />
             ) : (
               <>
+                {oneDrive.accessToken && !oneDrive.refreshToken ? (
+                  <Button
+                    title="Riconnetti"
+                    icon="refresh-outline"
+                    variant="primary"
+                    size="sm"
+                    onPress={() => void handleStorageReconnect("oneDrive")}
+                    loading={cloudStorageBusy === "oneDrive"}
+                  />
+                ) : null}
                 <Button
                   title="Salva su OneDrive"
                   icon="cloud-upload-outline"
@@ -456,6 +700,18 @@ export default function SettingsScreen() {
                   {formatLastSync(googleDrive.lastSync)}
                 </Text>
               ) : null}
+              {googleDrive?.connected && googleDrive.accessToken ? (
+                <Text
+                  style={{
+                    color: googleDrive.refreshToken ? t.positive : t.negative,
+                    fontSize: 10,
+                    fontWeight: "700",
+                    marginTop: 2,
+                  }}
+                >
+                  {tokenStatusText(googleDrive)}
+                </Text>
+              ) : null}
             </View>
           </View>
 
@@ -471,6 +727,16 @@ export default function SettingsScreen() {
               />
             ) : (
               <>
+                {googleDrive.accessToken && !googleDrive.refreshToken ? (
+                  <Button
+                    title="Riconnetti"
+                    icon="refresh-outline"
+                    variant="primary"
+                    size="sm"
+                    onPress={() => void handleStorageReconnect("googleDrive")}
+                    loading={cloudStorageBusy === "googleDrive"}
+                  />
+                ) : null}
                 <Button
                   title="Salva su Drive"
                   icon="cloud-upload-outline"
@@ -603,7 +869,64 @@ export default function SettingsScreen() {
         </View>
       </Card>
 
-      {/* 4. Informazioni */}
+      {/* 4. Notifiche Telegram */}
+      <SectionHeader title="Notifiche Telegram" />
+      <Card>
+        <Text style={{ color: t.textMuted, fontSize: font.small, lineHeight: 20, marginBottom: spacing.md }}>
+          Ricevi un messaggio su Telegram quando qualcuno aggiunge una spesa o un rimborso in un gruppo.
+        </Text>
+        <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm }}>
+          <Button
+            title={telegram.enabled ? "Notifiche attive" : "Notifiche disattivate"}
+            icon={telegram.enabled ? "notifications" : "notifications-off-outline"}
+            variant={telegram.enabled ? "primary" : "secondary"}
+            size="sm"
+            onPress={() => updateTelegramSettings({ enabled: !telegram.enabled })}
+          />
+        </View>
+        <TextField
+          label="Token del bot"
+          value={telegram.botToken}
+          onChangeText={(v) => updateTelegramSettings({ botToken: v })}
+          placeholder="123456789:AAE..."
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {telegramBotUsername ? (
+          <Text style={{ color: t.textMuted, fontSize: font.tiny, marginTop: -spacing.sm, marginBottom: spacing.sm }}>
+            Bot collegato: @{telegramBotUsername}
+          </Text>
+        ) : null}
+        <TextField
+          label="Chat ID"
+          value={telegram.chatId}
+          onChangeText={(v) => updateTelegramSettings({ chatId: v })}
+          placeholder="Es. -1001234567890"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <Button
+          title="Invia messaggio di prova"
+          icon="paper-plane-outline"
+          variant="secondary"
+          size="sm"
+          onPress={handleTelegramTest}
+          loading={telegramTestBusy}
+        />
+        <Text style={{ color: t.textFaint, fontSize: font.tiny, lineHeight: 18, marginTop: spacing.md }}>
+          1) Apri Telegram e scrivi a @BotFather → /newbot per creare il bot e copiare il token.{"\n"}
+          2) Aggiungi il bot al gruppo Telegram dei partecipanti (o scrivigli in privato).{"\n"}
+          3) Per trovare la Chat ID scrivi a @userinfobot oppure visita
+          https://api.telegram.org/bot{"<TOKEN>"}/getUpdates dopo aver scritto un messaggio al bot.
+        </Text>
+        <Text style={{ color: t.textMuted, fontSize: font.tiny, lineHeight: 18, marginTop: spacing.sm }}>
+          Lo stesso bot viene usato anche per ospitare i file dei gruppi condivisi via Telegram
+          (menu del gruppo → Condividi via file → Telegram): il documento del gruppo è un file
+          pinnato nella chat indicata dalla Chat ID, che dev'essere il gruppo Telegram dove sta il bot.
+        </Text>
+      </Card>
+
+      {/* 5. Informazioni */}
       <SectionHeader title="Informazioni" />
       <Card padded={false}>
         <ListRow title="Versione" trailing={<Text style={{ color: t.textMuted }}>{version}</Text>} />
@@ -616,7 +939,7 @@ export default function SettingsScreen() {
         <ListRow title="Licenza" subtitle="Open source, senza pubblicità, senza abbonamenti" last />
       </Card>
 
-      {/* 5. Zona pericolosa */}
+      {/* 6. Zona pericolosa */}
       <SectionHeader title="Zona pericolosa" />
       <Card>
         <Button title="Cancella tutti i dati" icon="trash-outline" variant="danger" onPress={onReset} />
@@ -631,7 +954,9 @@ export default function SettingsScreen() {
             (storageModalService === "oneDrive" ? oneDrive?.userEmail : googleDrive?.userEmail) || ""
           }
           initialName={name}
-          initialClientId=""
+          initialClientId={
+            (storageModalService === "oneDrive" ? oneDrive?.clientId : googleDrive?.clientId) || ""
+          }
           onClose={() => setStorageModalService(null)}
           onConnect={handleStorageConnect}
         />

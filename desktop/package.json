@@ -1,6 +1,6 @@
 {
   "name": "splitfree-desktop",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "SplitFree per macOS e Windows (involucro Electron della build web)",
   "main": "main.js",
   "private": true,

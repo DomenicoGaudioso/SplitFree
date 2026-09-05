@@ -19,6 +19,9 @@ export function emptyData(): AppData {
         oneDrive: { connected: false },
         googleDrive: { connected: false },
       },
+      webdav: { url: "", username: "", password: "", connected: false, lastSync: null },
+      onboardingSkipped: false,
+      telegram: { enabled: false, botToken: "", chatId: "" },
     },
   };
 }
@@ -59,6 +62,20 @@ export function migrate(raw: unknown): AppData {
       cloudStorage: {
         oneDrive: { connected: false, ...(r.settings?.cloudStorage?.oneDrive ?? {}) },
         googleDrive: { connected: false, ...(r.settings?.cloudStorage?.googleDrive ?? {}) },
+      },
+      webdav: {
+        url: "",
+        username: "",
+        password: "",
+        connected: false,
+        lastSync: null,
+        ...(r.settings?.webdav ?? {}),
+      },
+      telegram: {
+        enabled: false,
+        botToken: "",
+        chatId: "",
+        ...(r.settings?.telegram ?? {}),
       },
     },
   };

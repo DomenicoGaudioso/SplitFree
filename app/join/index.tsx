@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { Text, View } from "react-native";
+import { Linking, Text, View } from "react-native";
 import { ensureAuthUser, useCloudAuthUser } from "@/cloud/auth";
 import { cloudJoinGroup } from "@/cloud/cloudGroup";
-import { decodeInvite, type InvitePayload } from "@/cloud/invites";
+import { pullSharedGroup } from "@/cloud/fileShare/sync";
+import { decodeInvite, isFileInvite, type FileInvitePayload, type InvitePayload } from "@/cloud/invites";
 import type { Group } from "@/domain/types";
 import { useStore } from "@/store/store";
 import { Avatar, Button, Card, CloudSignInButtons, Screen, TextField } from "@/ui/components";
@@ -17,9 +18,10 @@ export default function JoinScreen() {
   const self = useStore((s) => s.data.people.find((p) => p.isSelf));
   const localGroups = useStore((s) => s.data.groups);
   const upsertCloudGroupPointer = useStore((s) => s.upsertCloudGroupPointer);
+  const deleteLocalPointer = useStore((s) => s.deleteGroup);
 
   const [pasted, setPasted] = useState("");
-  const [payload, setPayload] = useState<InvitePayload | null>(null);
+  const [payload, setPayload] = useState<InvitePayload | FileInvitePayload | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
@@ -32,8 +34,13 @@ export default function JoinScreen() {
     }
   }, [params.i]);
 
-  const authUser = useCloudAuthUser(payload?.config ?? null);
-  const alreadyMember = payload ? localGroups.some((g) => g.cloud?.remoteId === payload.groupId && g.cloud.config.projectId === payload.config.projectId) : false;
+  const isFile = isFileInvite(payload);
+  const authUser = useCloudAuthUser(!isFile && payload ? payload.config : null);
+  const alreadyMember = payload
+    ? isFile
+      ? localGroups.some((g) => g.id === payload.groupId || g.fileShare?.fileId === payload.fileId)
+      : localGroups.some((g) => g.cloud?.remoteId === payload.groupId && g.cloud.config.projectId === (payload as InvitePayload).config.projectId)
+    : false;
 
   const tryParse = () => {
     const decoded = decodeInvite(pasted);
@@ -46,7 +53,7 @@ export default function JoinScreen() {
   };
 
   const joinOneClick = async () => {
-    if (!payload) return;
+    if (!payload || isFile) return;
     setJoining(true);
     setJoinError(null);
     try {
@@ -73,6 +80,58 @@ export default function JoinScreen() {
         cloud: result.link,
       };
       upsertCloudGroupPointer(group);
+      router.replace({ pathname: "/group/[id]", params: { id: group.id } });
+    } catch (err) {
+      setJoinError(String(err));
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  /**
+   * Adesione a un gruppo condiviso via file (invito v2): nessun account richiesto.
+   * Crea il puntatore locale col fileShare, aggiunge la persona isSelf come membro,
+   * scarica subito il documento e, solo se il download riesce, entra nel gruppo.
+   * Con WebDAV le credenziali del server viaggiano nell'invito e finiscono nel
+   * fileShare del gruppo: il membro può scrivere subito, senza collegare nulla.
+   */
+  const joinFileShare = async () => {
+    if (!payload || !isFile) return;
+    setJoining(true);
+    setJoinError(null);
+    try {
+      const now = new Date().toISOString();
+      const group: Group = {
+        id: payload.groupId,
+        name: payload.groupName,
+        emoji: payload.emoji,
+        description: "",
+        currency: payload.currency,
+        memberIds: self ? [self.id] : [],
+        archivedAt: null,
+        createdAt: now,
+        updatedAt: now,
+        fileShare: {
+          provider: payload.provider,
+          fileId: payload.fileId,
+          shareUrl: payload.shareUrl,
+          ownerName: payload.ownerName,
+          lastSyncedAt: null,
+          webdav: payload.provider === "webdav" ? payload.webdav : undefined,
+          // Telegram: il messageId non viaggia nell'invito, si scopre dal pin al primo pull.
+          telegram: payload.provider === "telegram" && payload.telegram
+            ? { botToken: payload.telegram.botToken, chatId: payload.telegram.chatId, messageId: null }
+            : undefined,
+        },
+      };
+      upsertCloudGroupPointer(group);
+      const res = await pullSharedGroup(group.id);
+      if (!res.ok) {
+        // File illeggibile o eliminato: toglie il puntatore appena creato.
+        await deleteLocalPointer(group.id);
+        setJoinError(res.error || "Impossibile scaricare il file del gruppo.");
+        return;
+      }
       router.replace({ pathname: "/group/[id]", params: { id: group.id } });
     } catch (err) {
       setJoinError(String(err));
@@ -121,6 +180,28 @@ export default function JoinScreen() {
             <Card>
               <Text style={{ color: t.text, marginBottom: spacing.md }}>Fai già parte di questo gruppo su questo dispositivo.</Text>
               <Button title="Apri il gruppo" onPress={() => router.replace({ pathname: "/group/[id]", params: { id: payload.groupId } })} />
+            </Card>
+          ) : isFile ? (
+            <Card>
+              <Text style={{ color: t.textMuted, fontSize: font.small, lineHeight: 20, marginBottom: spacing.md }}>
+                {payload.provider === "telegram"
+                  ? `Condiviso da ${payload.ownerName} via Telegram: questo gruppo vive su Telegram, riceverai gli aggiornamenti lì. Il link contiene il token del bot, quindi potrai subito leggere e aggiungere spese: trattalo come un segreto.`
+                  : payload.provider === "webdav"
+                    ? `Condiviso da ${payload.ownerName} via WebDAV: il link contiene le credenziali del server, quindi potrai subito leggere e aggiungere spese. Trattalo come un segreto.`
+                    : `Condiviso da ${payload.ownerName} via ${payload.provider === "onedrive" ? "OneDrive" : "Google Drive"}: per entrare e leggere non serve nessun account. Per aggiungere spese collegherai il tuo account ${payload.provider === "onedrive" ? "OneDrive" : "Google Drive"} dalle Impostazioni.`}
+              </Text>
+              <Button title="Entra nel gruppo" icon="log-in-outline" size="lg" onPress={() => void joinFileShare()} loading={joining} />
+              {payload.provider === "telegram" && payload.telegram?.tgInviteLink ? (
+                <Button
+                  title="Entra nel gruppo Telegram per le notifiche"
+                  icon="paper-plane-outline"
+                  variant="secondary"
+                  size="sm"
+                  onPress={() => void Linking.openURL(payload.telegram!.tgInviteLink!).catch(() => undefined)}
+                  style={{ marginTop: spacing.sm }}
+                />
+              ) : null}
+              {joinError ? <Text style={{ color: t.negative, fontSize: font.small, marginTop: spacing.md }}>{joinError}</Text> : null}
             </Card>
           ) : (
             <Card>
