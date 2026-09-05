@@ -49,6 +49,22 @@ export function isDefaultCloudProject(project?: { id?: string; isDefault?: boole
 }
 
 /**
+ * Riconosce se una configurazione Firebase è ancora il segnaposto integrato
+ * nell'app (chiave finta, progetto inesistente): in quel caso ogni chiamata
+ * a Firebase Auth/Firestore fallirebbe con "API key not valid". Serve per
+ * bloccare subito con un messaggio chiaro invece di un errore crittico.
+ */
+export function isPlaceholderFirebaseConfig(config: FirebaseWebConfig | null | undefined): boolean {
+  if (!config) return true;
+  if (!config.apiKey || !config.projectId) return true;
+  return (
+    config.apiKey === "AIzaSySplitFreeDefaultPublicApiKey2026" ||
+    config.projectId === "splitfree-app" ||
+    config.apiKey.includes("SplitFreeDefault")
+  );
+}
+
+/**
  * Riconosce se un Client ID OAuth è un valore segnaposto non registrato su Azure o Google Cloud,
  * prevenendo chiamate a vuoto che generano errori '401 invalid_client' o 'AADSTS700016'.
  */

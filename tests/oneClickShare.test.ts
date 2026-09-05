@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
+// Configura un progetto Firebase "reale" prima che i moduli vengano caricati:
+// la config di default (segnaposto) viene ora rifiutata dalla condivisione.
+vi.hoisted(() => {
+  process.env.EXPO_PUBLIC_FIREBASE_API_KEY = "test-real-api-key";
+  process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID = "test-real-project";
+});
+
 // Mock expo-clipboard prima degli altri import
 vi.mock("expo-clipboard", () => ({
   setStringAsync: vi.fn(),
@@ -41,6 +48,15 @@ vi.mock("@/cloud/auth", () => ({
     provider: "guest",
   })),
   getExistingAuthUser: vi.fn(() => null),
+  authFor: vi.fn(() => ({
+    currentUser: {
+      uid: "test-uid-123",
+      displayName: "Test User",
+      email: "test@example.com",
+      photoURL: null,
+      isAnonymous: false,
+    },
+  })),
 }));
 
 vi.mock("@/cloud/cloudGroup", () => ({
@@ -151,5 +167,50 @@ describe("shareGroupOneClick", () => {
     expect(res.ok).toBe(true);
     expect(res.remoteId).toBe("already-cloud-id");
     expect(res.link?.startsWith("splitfree://join?i=")).toBe(true);
+  });
+
+  it("rifiuta la condivisione con la configurazione Firebase segnaposto", async () => {
+    const placeholderGroup: Group = {
+      ...sampleGroup,
+      cloud: {
+        remoteId: "x",
+        ownerUid: "y",
+        config: {
+          apiKey: "AIzaSySplitFreeDefaultPublicApiKey2026",
+          authDomain: "splitfree-app.firebaseapp.com",
+          projectId: "splitfree-app",
+          appId: "a",
+        },
+      },
+    };
+
+    const res = await shareGroupOneClick({
+      group: placeholderGroup,
+      people: samplePeople,
+      expenses: [],
+      settlements: [],
+      self: samplePeople[0],
+      skipNativeShare: true,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("progetto cloud predefinito");
+  });
+
+  it("rifiuta la condivisione se manca una sessione Firebase reale (solo profilo locale)", async () => {
+    const { authFor } = await import("@/cloud/auth");
+    vi.mocked(authFor).mockReturnValueOnce({ currentUser: null } as never);
+
+    const res = await shareGroupOneClick({
+      group: sampleGroup,
+      people: samplePeople,
+      expenses: [],
+      settlements: [],
+      self: samplePeople[0],
+      skipNativeShare: true,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("sessione cloud");
   });
 });

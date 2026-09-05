@@ -2,8 +2,8 @@ import { Platform, Share } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { writeBatch } from "firebase/firestore";
 import type { Expense, Group, GroupCloudLink, Person, Settlement } from "@/domain/types";
-import { getDefaultCloudProject } from "@/cloud/defaultConfig";
-import { ensureAuthUser, getExistingAuthUser, type CloudAuthUser } from "./auth";
+import { getDefaultCloudProject, isPlaceholderFirebaseConfig } from "@/cloud/defaultConfig";
+import { authFor, ensureAuthUser, getExistingAuthUser, type CloudAuthUser } from "./auth";
 import { cloudCreateGroup, cloudCreateInvite } from "./cloudGroup";
 import { firestoreFor } from "./firestore";
 import { buildInviteLink, type InvitePayload } from "./invites";
@@ -43,10 +43,50 @@ export async function shareGroupOneClick(params: {
     const googleClientId = group.cloud?.googleClientId ?? defaultProj.googleClientId;
     const microsoftClientId = group.cloud?.microsoftClientId ?? defaultProj.microsoftClientId;
 
+    // 0. Controlli preventivi: senza un progetto Firebase reale e una sessione
+    //    autenticata sul server, ogni scrittura fallirebbe più avanti con
+    //    errori crittici ("API key not valid" / "Missing or insufficient
+    //    permissions"). Meglio bloccare subito con istruzioni chiare.
+    if (isPlaceholderFirebaseConfig(config)) {
+      return {
+        ok: false,
+        error:
+          "Il progetto cloud predefinito non è configurato: la condivisione richiede un progetto Firebase reale. " +
+          "Vai in Impostazioni → Progetti cloud e inserisci la configurazione del tuo progetto Firebase " +
+          "(apiKey, projectId, appId…), poi riprova.",
+      };
+    }
+
     // 1. Assicura che ci sia una sessione attiva
     let authUser: CloudAuthUser | null = getExistingAuthUser(config);
     if (!authUser) {
       authUser = await ensureAuthUser(config, self?.name || "Utente");
+    }
+
+    // La sessione deve esistere davvero su Firebase Auth: gli accessi locali
+    // di riserva (ospite/account senza Firebase) producono un uid non
+    // riconosciuto dal server e ogni scrittura verrebbe negata.
+    const firebaseSession = authFor(config).currentUser;
+    if (!firebaseSession) {
+      return {
+        ok: false,
+        error:
+          "Nessuna sessione cloud attiva sul server. Verifica la configurazione del progetto Firebase " +
+          "(Impostazioni → Progetti cloud) e che nel progetto sia attivo almeno un metodo di accesso " +
+          "(anonimo o email/password), poi riprova.",
+      };
+    }
+    // Usa sempre l'uid reale della sessione Firebase, anche se in memoria
+    // c'è un profilo locale di riserva con un uid diverso.
+    if (firebaseSession.uid !== authUser.uid) {
+      authUser = {
+        uid: firebaseSession.uid,
+        name: firebaseSession.displayName ?? authUser.name,
+        email: firebaseSession.email ?? authUser.email,
+        photoUrl: firebaseSession.photoURL ?? authUser.photoUrl,
+        provider: authUser.provider,
+        isAnonymous: firebaseSession.isAnonymous,
+      };
     }
 
     let cloudLink: GroupCloudLink;
@@ -178,9 +218,25 @@ export async function shareGroupOneClick(params: {
       cloud: cloudLink,
     };
   } catch (err) {
+    const raw = String(err);
+    if (raw.includes("permission-denied") || raw.includes("Missing or insufficient permissions")) {
+      return {
+        ok: false,
+        error:
+          "Permessi insufficienti sul database cloud. Pubblica le regole aggiornate (file firestore.rules) " +
+          "nella console Firebase del progetto: Firestore Database → Regole.",
+      };
+    }
+    if (raw.includes("api-key-not-valid") || raw.includes("API key not valid")) {
+      return {
+        ok: false,
+        error:
+          "Chiave API Firebase non valida. Controlla la configurazione del progetto in Impostazioni → Progetti cloud.",
+      };
+    }
     return {
       ok: false,
-      error: `Impossibile condividere nel cloud: ${String(err)}`,
+      error: `Impossibile condividere nel cloud: ${raw}`,
     };
   }
 }

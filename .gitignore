@@ -46,3 +46,6 @@ desktop/node_modules/
 desktop/app/
 desktop/out/
 desktop/build/
+
+# Export locali (dati privati, es. CSV Splitwise)
+export.csv

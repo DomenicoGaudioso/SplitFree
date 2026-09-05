@@ -60,9 +60,16 @@ service cloud.firestore {
         allow read: if isMember(groupId);
         // Un utente può aggiungere SE STESSO: chi crea il gruppo (ne è già
         // proprietario) senza bisogno di altro, chiunque altro solo
-        // presentando un invito attivo per questo gruppo.
-        allow create: if isSelf(uid) && (isGroupOwner(groupId, uid) || hasValidInvite(groupId));
-        allow update: if isSelf(uid);
+        // presentando un invito attivo per questo gruppo. Inoltre il
+        // proprietario può creare schede membro "segnaposto" per le persone
+        // senza account, quando migra un gruppo locale con le sue spese
+        // (condivisione 1-click): i segnaposto non possono accedere né
+        // modificare nulla, servono solo a mostrare nomi e saldi corretti.
+        allow create: if (isSelf(uid) && (isGroupOwner(groupId, uid) || hasValidInvite(groupId)))
+          || isGroupOwner(groupId, request.auth.uid);
+        // Ognuno modifica la propria scheda; il proprietario può aggiornare
+        // anche i segnaposto (rinominarli, cambiare colore).
+        allow update: if isSelf(uid) || isGroupOwner(groupId, request.auth.uid);
         // Uscire dal gruppo (cancellare la propria scheda) o essere membri
         // per rimuovere qualcun altro durante l'eliminazione totale.
         allow delete: if isSelf(uid) || isMember(groupId);
