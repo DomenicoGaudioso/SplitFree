@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categoryIdFor, parseSplitwiseCsv } from "@/domain/splitwiseImport";
+import { applyImportOptions, categoryIdFor, parseSplitwiseCsv } from "@/domain/splitwiseImport";
 
 const CSV = [
   "Data,Descrizione,Categorie,Costo,Valuta,Domenico Gaudioso,Cinzia",
@@ -136,7 +136,8 @@ describe("parseSplitwiseCsv — split non equi (water-filling)", () => {
   });
 });
 
-describe("categoryIdFor", () => {  it("mappa le categorie Splitwise sugli id interni", () => {
+describe("categoryIdFor", () => {
+  it("mappa le categorie Splitwise sugli id interni", () => {
     expect(categoryIdFor("Alimentari", "Spesa coop")).toBe("groceries");
     expect(categoryIdFor("Ristorante", "Pizza")).toBe("food");
     expect(categoryIdFor("Autobus/treno", "Bus")).toBe("transport");
@@ -154,5 +155,77 @@ describe("categoryIdFor", () => {  it("mappa le categorie Splitwise sugli id int
     expect(categoryIdFor("Generali", "Pizza con amici")).toBe("food");
     expect(categoryIdFor("Sconosciuta", "xyzzy qwerty")).toBe("other");
     expect(categoryIdFor("", "xyzzy qwerty")).toBe("other");
+  });
+});
+
+
+describe("applyImportOptions", () => {
+  const baseRows = () => {
+    const res = parseSplitwiseCsv(CSV);
+    if (!res.ok) throw new Error(res.error);
+    return res.rows;
+  };
+
+  it("senza opzioni: righe invariate", () => {
+    const rows = baseRows();
+    const res = applyImportOptions(rows, "EUR");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.rows).toBe(rows);
+    expect(res.skippedByDate).toBe(0);
+  });
+
+  it("filtro data: salta le righe precedenti e le conta in skippedByDate", () => {
+    const res = applyImportOptions(baseRows(), "USD", { fromDate: "2024-05-01", currencyMode: "keep" });
+    if (!res.ok) throw new Error(res.error);
+    expect(res.skippedByDate).toBe(3); // 2024-01-01, 2024-01-24 e 2024-02-01
+    expect(res.rows.every((r) => r.date >= "2024-05-01")).toBe(true);
+    expect(res.rows).toHaveLength(2);
+  });
+
+  it("fromDate non valida → errore", () => {
+    const res = applyImportOptions(baseRows(), "USD", { fromDate: "01/05/2024", currencyMode: "keep" });
+    expect(res.ok).toBe(false);
+  });
+
+  it("convert: tasso nel verso della cache (1 EUR = 2 USD), centesimi esatti", () => {
+    const rows = baseRows();
+    const res = applyImportOptions(rows, "EUR", { currencyMode: "convert", rates: { USD: 2 } });
+    if (!res.ok) throw new Error(res.error);
+    const r = res.rows[0]; // 481.44 USD → 240.72 EUR
+    expect(r.currency).toBe("EUR");
+    expect(r.amountMinor).toBe(24072);
+    // Somme payers/splits preservate sul totale convertito.
+    for (const row of res.rows) {
+      expect(row.currency).toBe("EUR");
+      expect(row.payers.reduce((a, p) => a + p.amountMinor, 0)).toBe(row.amountMinor);
+      expect(row.splits.reduce((a, s) => a + s.amountMinor, 0)).toBe(row.amountMinor);
+    }
+  });
+
+  it("convert: errore se manca il tasso di una valuta presente", () => {
+    const csv = [
+      "Data,Descrizione,Categorie,Costo,Valuta,A,B",
+      "2024-01-01,Uno,Generali,10.00,USD,10.00,-10.00",
+      "2024-01-02,Due,Generali,1000.00,JPY,1000.00,-1000.00",
+    ].join("\n");
+    const parsed = parseSplitwiseCsv(csv);
+    if (!parsed.ok) throw new Error(parsed.error);
+    const res = applyImportOptions(parsed.rows, "EUR", { currencyMode: "convert", rates: { USD: 1.08 } });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toContain("JPY");
+  });
+
+  it("relabel: importi identici, cambia solo la valuta", () => {
+    const rows = baseRows();
+    const res = applyImportOptions(rows, "EUR", { currencyMode: "relabel" });
+    if (!res.ok) throw new Error(res.error);
+    res.rows.forEach((r, i) => {
+      expect(r.currency).toBe("EUR");
+      expect(r.amountMinor).toBe(rows[i].amountMinor);
+      expect(r.payers).toEqual(rows[i].payers);
+      expect(r.splits).toEqual(rows[i].splits);
+    });
   });
 });

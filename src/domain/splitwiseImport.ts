@@ -12,6 +12,8 @@
  */
 import { guessFromTitle } from "./categories";
 import { isValidIsoDate } from "./dates";
+import { convertMinor } from "./money";
+import { allocateByWeights } from "./split";
 
 export type ParsedRow = {
   /** Data validata "YYYY-MM-DD". */
@@ -275,4 +277,81 @@ export function categoryIdFor(csvCategory: string, title: string): string {
   if (mapped) return mapped;
   if (mapped === undefined && key.startsWith("intrattenimento")) return "entertainment";
   return guessFromTitle(title).categoryId;
+}
+
+
+/**
+ * Opzioni di import scelte dall'utente prima di scrivere nello store.
+ * - fromDate: importa solo le righe con data >= fromDate (le altre contate in skippedByDate).
+ * - currencyMode:
+ *   - "keep": mantieni la valuta del CSV (exchangeRate 1);
+ *   - "convert": converti nella valuta del gruppo col tasso `rates[valuta]`
+ *     (quante unità estere per 1 unità del gruppo, come la chiave cache
+ *     "EUR>USD" di settings.rates); gli importi diventano valuta gruppo;
+ *   - "relabel": importi identici come numeri, cambia solo l'etichetta valuta.
+ */
+export type ImportOptions = {
+  fromDate?: string;
+  currencyMode: "keep" | "convert" | "relabel";
+  rates?: Record<string, number>;
+};
+
+export type ApplyOptionsResult =
+  | { ok: true; rows: ParsedRow[]; skippedByDate: number }
+  | { ok: false; error: string };
+
+/** Applica filtro data e modalità valuta alle righe parsate, senza toccare lo store. */
+export function applyImportOptions(rows: ParsedRow[], groupCurrency: string, options?: ImportOptions): ApplyOptionsResult {
+  if (!options) return { ok: true, rows, skippedByDate: 0 };
+  const fromDate = options.fromDate?.trim();
+  if (fromDate && !isValidIsoDate(fromDate)) {
+    return { ok: false, error: `Data "da" non valida: ${fromDate} (atteso AAAA-MM-GG).` };
+  }
+
+  let out = rows;
+  let skippedByDate = 0;
+  if (fromDate) {
+    out = [];
+    for (const r of rows) {
+      if (r.date < fromDate) skippedByDate++;
+      else out.push(r);
+    }
+  }
+
+  const mode = options.currencyMode ?? "keep";
+  if (mode === "keep") return { ok: true, rows: out, skippedByDate };
+
+  if (mode === "convert") {
+    // Tutti i tassi devono esserci prima di convertire alcunché.
+    const foreign = [...new Set(out.map((r) => r.currency).filter((c) => c !== groupCurrency))];
+    for (const cur of foreign) {
+      const rate = options.rates?.[cur];
+      if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) {
+        return { ok: false, error: `Tasso di cambio mancante per ${cur}: serve sapere quante ${cur} vale 1 ${groupCurrency}.` };
+      }
+    }
+    return {
+      ok: true,
+      skippedByDate,
+      rows: out.map((r) => {
+        if (r.currency === groupCurrency) return r;
+        const rate = options.rates![r.currency];
+        // rates[cur] = unità estere per 1 unità gruppo → convertMinor vuole l'inverso.
+        const amountMinor = convertMinor(r.amountMinor, 1 / rate, r.currency, groupCurrency);
+        // Ripartizione proporzionale con somme esatte sul totale convertito.
+        const payerAmounts = allocateByWeights(amountMinor, r.payers.map((p) => p.amountMinor));
+        const splitAmounts = allocateByWeights(amountMinor, r.splits.map((s) => s.amountMinor));
+        return {
+          ...r,
+          currency: groupCurrency,
+          amountMinor,
+          payers: r.payers.map((p, i) => ({ name: p.name, amountMinor: payerAmounts[i] })),
+          splits: r.splits.map((s, i) => ({ name: s.name, amountMinor: splitAmounts[i] })),
+        };
+      }),
+    };
+  }
+
+  // relabel: stessi numeri, etichetta = valuta del gruppo.
+  return { ok: true, skippedByDate, rows: out.map((r) => ({ ...r, currency: groupCurrency })) };
 }

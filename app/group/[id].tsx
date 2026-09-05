@@ -9,12 +9,14 @@ import { shareGroupOneClick } from "@/cloud/oneClickShare";
 import { shareGroupViaFile } from "@/cloud/fileShare/share";
 import { pullSharedGroup, useFileShareSyncStatus } from "@/cloud/fileShare/sync";
 import { formatIsoDate, monthKey, monthLabelLong } from "@/domain/dates";
-import { formatMinor } from "@/domain/money";
-import { parseSplitwiseCsv } from "@/domain/splitwiseImport";
+import { convertMinor, formatMinor } from "@/domain/money";
+import { parseSplitwiseCsv, type ImportOptions } from "@/domain/splitwiseImport";
 import type { FileShareProvider } from "@/domain/types";
 import { useGroupActions } from "@/store/groupActions";
 import { useGroupFinance, useResolvedGroup, useSelf, useSyncCloudPointer } from "@/store/selectors";
 import { useStore } from "@/store/store";
+import { DeleteExpensesBeforeModal } from "@/ui/components/DeleteExpensesBeforeModal";
+import { SplitwiseImportModal, type SplitwiseParsedSummary } from "@/ui/components/SplitwiseImportModal";
 import { TelegramShareWizard } from "@/ui/components/TelegramShareWizard";
 import {
   Avatar,
@@ -37,7 +39,7 @@ import { confirm, notify } from "@/ui/dialogs";
 import { font, spacing, useTheme } from "@/ui/theme";
 
 type Tab = "expenses" | "balances" | "settlements";
-type LocalMenuAction = "share" | "shareFile" | "importCsv" | "edit" | "archive" | "delete";
+type LocalMenuAction = "share" | "shareFile" | "importCsv" | "edit" | "archive" | "deleteBefore" | "delete";
 type CloudMenuAction = "invite" | "leave" | "deleteAll";
 
 /** "2026-09-04T08:53:58.334Z" -> "08:53" (ora locale). */
@@ -61,10 +63,14 @@ export default function GroupDetailScreen() {
   const deleteLocalPointer = useStore((s) => s.deleteGroup);
   const upsertCloudGroupPointer = useStore((s) => s.upsertCloudGroupPointer);
   const importSplitwiseRows = useStore((s) => s.importSplitwiseRows);
+  const deleteExpensesBefore = useStore((s) => s.deleteExpensesBefore);
+  const cachedRates = useStore((s) => s.data.settings.rates);
   const [tab, setTab] = useState<Tab>(initialTab ?? "expenses");
   const [menu, setMenu] = useState(false);
   const [providerPicker, setProviderPicker] = useState(false);
   const [telegramWizard, setTelegramWizard] = useState(false);
+  const [importParsed, setImportParsed] = useState<SplitwiseParsedSummary | null>(null);
+  const [deleteBeforeOpen, setDeleteBeforeOpen] = useState(false);
   const [simplified, setSimplified] = useState(true);
   const [busyMenu, setBusyMenu] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -198,17 +204,47 @@ export default function GroupDetailScreen() {
         notify("Nessuna spesa trovata", "Il CSV non contiene righe di spesa valide da importare.");
         return;
       }
-      const result = importSplitwiseRows(group.id, parsed.rows);
-      const extra = [
-        result.peopleCreated > 0 ? `${result.peopleCreated} ${result.peopleCreated === 1 ? "persona creata" : "persone create"}` : null,
-        parsed.skipped > 0 ? `${parsed.skipped} ${parsed.skipped === 1 ? "riga saltata" : "righe saltate"}` : null,
-      ]
-        .filter(Boolean)
-        .join(", ");
-      notify("Import completato", `${result.added} ${result.added === 1 ? "spesa importata" : "spese importate"}${extra ? ` (${extra})` : ""}.`);
+      // Le opzioni (filtro data, conversione valuta) si scelgono nel modale prima di scrivere.
+      setImportParsed(parsed);
     } catch (err) {
       notify("Import non riuscito", String(err));
     }
+  };
+
+  const confirmSplitwiseImport = (options: ImportOptions) => {
+    const parsed = importParsed;
+    setImportParsed(null);
+    if (!parsed) return;
+    const result = importSplitwiseRows(group.id, parsed.rows, options);
+    if (!result.ok) {
+      notify("Import non riuscito", result.error);
+      return;
+    }
+    const skippedTotal = parsed.skipped + result.skippedByDate;
+    const extra = [
+      result.peopleCreated > 0 ? `${result.peopleCreated} ${result.peopleCreated === 1 ? "persona creata" : "persone create"}` : null,
+      skippedTotal > 0 ? `${skippedTotal} ${skippedTotal === 1 ? "riga saltata" : "righe saltate"}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    notify("Import completato", `${result.added} ${result.added === 1 ? "spesa importata" : "spese importate"}${extra ? ` (${extra})` : ""}.`);
+  };
+
+  const handleDeleteBeforeSubmit = async (isoDate: string) => {
+    setDeleteBeforeOpen(false);
+    const count = expenses.filter((e) => e.date < isoDate).length;
+    if (count === 0) {
+      notify("Nessuna spesa", `Non ci sono spese prima del ${formatIsoDate(isoDate)}.`);
+      return;
+    }
+    const ok = await confirm(
+      "Eliminare le spese?",
+      `${count} ${count === 1 ? "spesa" : "spese"} con data precedente al ${formatIsoDate(isoDate)} ${count === 1 ? "verrà eliminata" : "verranno eliminate"} definitivamente. I rimborsi non vengono toccati.`,
+      { confirmText: "Elimina", destructive: true }
+    );
+    if (!ok) return;
+    const deleted = await deleteExpensesBefore(group.id, isoDate);
+    notify("Spese eliminate", `${deleted} ${deleted === 1 ? "spesa eliminata" : "spese eliminate"}.`);
   };
 
   const onLocalMenu = async (action: LocalMenuAction) => {
@@ -226,6 +262,10 @@ export default function GroupDetailScreen() {
     }
     if (action === "edit") router.push({ pathname: "/group/edit", params: { id: group.id } });
     if (action === "archive") void actions.archive(!group.archivedAt);
+    if (action === "deleteBefore") {
+      setDeleteBeforeOpen(true);
+      return;
+    }
     if (action === "delete") {
       const ok = await confirm("Eliminare il gruppo?", `"${group.name}" con ${expenses.length} spese e ${settlements.length} rimborsi verrà eliminato definitivamente, allegati compresi.`, {
         confirmText: "Elimina",
@@ -401,7 +441,7 @@ export default function GroupDetailScreen() {
               <View key={month}>
                 <SectionHeader
                   title={monthLabelLong(month)}
-                  right={<Text style={{ color: t.textMuted, fontSize: font.small, fontWeight: "700" }}>{formatMinor(items.reduce((a, e) => a + (e.currency === group.currency ? e.amountMinor : 0), 0), group.currency)}</Text>}
+                  right={<Text style={{ color: t.textMuted, fontSize: font.small, fontWeight: "700" }}>{formatMinor(items.reduce((a, e) => a + convertMinor(e.amountMinor, e.exchangeRate, e.currency, group.currency), 0), group.currency)}</Text>}
                 />
                 <Card padded={false}>
                   {items.map((e, i) => (
@@ -552,6 +592,7 @@ export default function GroupDetailScreen() {
             { value: "importCsv", label: "Importa CSV da Splitwise", subtitle: "Carica le spese da un export .csv", leading: <Ionicons name="download-outline" size={22} color={t.text} /> },
             { value: "edit", label: "Modifica gruppo", subtitle: "Nome, valuta, membri", leading: <Ionicons name="create-outline" size={22} color={t.text} /> },
             { value: "archive", label: group.archivedAt ? "Ripristina" : "Archivia", subtitle: "Nascondi dalla lista principale", leading: <Ionicons name="archive-outline" size={22} color={t.text} /> },
+            { value: "deleteBefore", label: "Elimina spese prima di una data…", subtitle: "Cancellazione massiva, i rimborsi restano", leading: <Ionicons name="calendar-clear-outline" size={22} color={t.negative} /> },
             { value: "delete", label: "Elimina gruppo", subtitle: "Cancella spese e rimborsi", leading: <Ionicons name="trash-outline" size={22} color={t.negative} /> },
           ]}
           onSelect={(a) => void onLocalMenu(a)}
@@ -579,6 +620,19 @@ export default function GroupDetailScreen() {
         self={self}
         onLinked={(updated) => upsertCloudGroupPointer(updated)}
         onClose={() => setTelegramWizard(false)}
+      />
+      <SplitwiseImportModal
+        visible={importParsed !== null}
+        groupCurrency={group.currency}
+        parsed={importParsed}
+        cachedRates={cachedRates}
+        onClose={() => setImportParsed(null)}
+        onConfirm={confirmSplitwiseImport}
+      />
+      <DeleteExpensesBeforeModal
+        visible={deleteBeforeOpen}
+        onClose={() => setDeleteBeforeOpen(false)}
+        onSubmit={(isoDate) => void handleDeleteBeforeSubmit(isoDate)}
       />
       {busyMenu ? (
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.05)" }]} />

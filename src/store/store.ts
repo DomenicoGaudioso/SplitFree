@@ -17,7 +17,7 @@ import type {
   WebDavSettings,
 } from "@/domain/types";
 import { DEFAULT_CATEGORY_ID } from "@/domain/categories";
-import { categoryIdFor, type ParsedRow } from "@/domain/splitwiseImport";
+import { applyImportOptions, categoryIdFor, type ImportOptions, type ParsedRow } from "@/domain/splitwiseImport";
 import { normalizeEmail } from "@/domain/validate";
 import { getDefaultCloudProject } from "@/cloud/defaultConfig";
 import { applySharedDocToData } from "@/cloud/fileShare/apply";
@@ -96,7 +96,14 @@ type Store = {
   deleteExpense: (id: string) => Promise<void>;
 
   /** Importa righe da un CSV Splitwise: crea le persone mancanti e le spese del gruppo. */
-  importSplitwiseRows: (groupId: string, rows: ParsedRow[]) => { added: number; peopleCreated: number };
+  importSplitwiseRows: (
+    groupId: string,
+    rows: ParsedRow[],
+    options?: ImportOptions
+  ) => { ok: true; added: number; peopleCreated: number; skippedByDate: number } | { ok: false; error: string };
+
+  /** Elimina le spese del gruppo con data < isoDate (i rimborsi restano). Ritorna quante ne ha eliminate. */
+  deleteExpensesBefore: (groupId: string, isoDate: string) => Promise<number>;
 
   addSettlement: (input: Omit<Settlement, "id" | "createdAt">) => Settlement;
   deleteSettlement: (id: string) => void;
@@ -344,9 +351,13 @@ export const useStore = create<Store>((set, get) => {
       }));
     },
 
-    importSplitwiseRows: (groupId, rows) => {
+    importSplitwiseRows: (groupId, rows, options) => {
       const group = get().data.groups.find((g) => g.id === groupId);
-      if (!group) return { added: 0, peopleCreated: 0 };
+      if (!group) return { ok: false as const, error: "Gruppo non trovato." };
+      // Filtro data e conversione valuta: validati PRIMA di scrivere alcunché.
+      const applied = applyImportOptions(rows, group.currency, options);
+      if (!applied.ok) return applied;
+      const rowsToAdd = applied.rows;
       // Risolve un nome CSV in una Person esistente (match case-insensitive,
       // preferendo isSelf) oppure la crea e la aggiunge ai membri del gruppo.
       const idByName = new Map<string, string>();
@@ -372,7 +383,7 @@ export const useStore = create<Store>((set, get) => {
         return id;
       };
       let added = 0;
-      for (const row of rows) {
+      for (const row of rowsToAdd) {
         get().addExpense({
           groupId,
           title: row.title,
@@ -391,7 +402,24 @@ export const useStore = create<Store>((set, get) => {
       if (newMemberIds.length > 0) {
         get().updateGroup(groupId, { memberIds: [...group.memberIds, ...newMemberIds] });
       }
-      return { added, peopleCreated };
+      return { ok: true as const, added, peopleCreated, skippedByDate: applied.skippedByDate };
+    },
+
+    deleteExpensesBefore: async (groupId, isoDate) => {
+      const d = get().data;
+      const doomed = d.expenses.filter((e) => e.groupId === groupId && e.date < isoDate);
+      if (doomed.length === 0) return 0;
+      const ids = new Set(doomed.map((e) => e.id));
+      for (const e of doomed) {
+        const keys = d.attachments.filter((a) => a.expenseId === e.id).map((a) => a.storageKey);
+        await deleteExpenseAttachmentFiles(e.id, keys);
+      }
+      commit((dd) => ({
+        ...dd,
+        expenses: dd.expenses.filter((e) => !ids.has(e.id)),
+        attachments: dd.attachments.filter((a) => !ids.has(a.expenseId)),
+      }));
+      return doomed.length;
     },
 
     addSettlement: (input) => {
